@@ -6,21 +6,13 @@ from itertools import zip_longest
 
 from board import Board
 from movement import MovementRules
-from piece import Job, Piece, Team
+from piece import Piece, Team
 from turn_manager import TurnManager
 
 
 class Prototype:
-    def __init__(self, pieces: Iterable[Piece] | None = None):
-        blue1 = Piece("청1", "슬레이어", Team.BLUE, Job.MELEE,
-                      "남색 망토의 대검 슬레이어-1.png", (2, 1))
-        blue2 = Piece("청2", "암살자", Team.BLUE, Job.JOKER,
-                      "고요한 쌍단검 암살자-2.png", (1, 2))
-        red1 = Piece("홍1", "메이지", Team.RED, Job.RANGED,
-                     "은발의 푸른 마도사-6.png", (5, 1))
-        red2 = Piece("홍2", "카드술사", Team.RED, Job.JOKER,
-                     "라벤더 카드를 든 마법사-5.png", (6, 2))
-        self.board = Board(pieces if pieces is not None else (blue1, blue2, red1, red2))
+    def __init__(self, pieces: Iterable[Piece]):
+        self.board = Board(pieces)
         self.movement = MovementRules(self.board)
         blue = [piece for piece in self.board.pieces if piece.team is Team.BLUE]
         red = [piece for piece in self.board.pieces if piece.team is Team.RED]

@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pico2d
 
+from character_data import CHARACTERS
 from piece import Job, Team
 from prototype import Prototype
 
@@ -19,8 +20,9 @@ class BattleView:
     blue = (104, 191, 242)
     red = (244, 143, 141)
     accent = (243, 211, 132)
+    movement_labels = {Job.MELEE: "상하좌우 1칸", Job.RANGED: "대각선 1칸", Job.JOKER: "전 방향 1칸"}
 
-    def __init__(self, game: Prototype):
+    def __init__(self, game: Prototype | None = None):
         self.game = game
         root = Path(__file__).resolve().parents[1]
         fonts = Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts"
@@ -29,8 +31,8 @@ class BattleView:
             raise FileNotFoundError("한국어 표시를 위한 맑은 고딕 또는 굴림 글꼴이 필요합니다.")
         self.fonts = {size: pico2d.load_font(str(font), size) for size in (14, 16, 18, 22, 30)}
         self.images = {
-            piece.identifier: pico2d.load_image(str(root / "Resource" / piece.image_name))
-            for piece in game.board.pieces
+            character.image_name: pico2d.load_image(str(root / "Resource" / character.image_name))
+            for character in CHARACTERS
         }
         self.hover: tuple[int, int] | None = None
 
@@ -67,19 +69,20 @@ class BattleView:
     def draw(self) -> None:
         self.rectangle((0, 0, self.width - 1, self.height - 1), self.background)
         self.label(40, 735, "전략 RPG 체스", 30)
-        self.label(40, 700, "이동 · 충돌 · 턴 프로토타입", 16, self.muted)
+        self.label(40, 700, "03 / 선택한 편성으로 이동 · 충돌 · 턴 확인", 16, self.muted)
         self.label(884, 735, f"ROUND {self.game.turns.round:02}", 22, self.accent)
-        self.label(884, 704, "양측 수동 조작 / 4기", 14, self.muted)
+        self.label(884, 704, f"양측 수동 조작 / {len(self.game.board.pieces)}기", 14, self.muted)
         self.draw_turn_order()
         self.draw_board()
         self.draw_details()
         self.draw_footer()
 
     def draw_turn_order(self) -> None:
+        slot_width = 1040 // len(self.game.turns.order)
         for index, piece in enumerate(self.game.turns.order):
-            x = 40 + index * 260
+            x = 40 + index * slot_width
             active = piece is self.game.current
-            self.rectangle((x, 635, x + 250, 680), (36, 47, 60) if active else (26, 34, 45))
+            self.rectangle((x, 635, x + slot_width - 10, 680), (36, 47, 60) if active else (26, 34, 45))
             self.rectangle((x, 635, x + 3, 680), self.team_color(piece.team))
             if active:
                 status = "현재 차례"
@@ -87,16 +90,17 @@ class BattleView:
                 status = "행동 완료"
             else:
                 status = "대기"
-            self.label(x + 14, 657, f"{piece.identifier}  {piece.name}", 16,
+            self.label(x + 10, 666, f"{piece.identifier} {piece.name}", 14,
                        self.team_color(piece.team) if active else self.text)
-            self.label(x + 174, 657, status, 14, self.accent if active else self.muted)
+            self.label(x + 10, 646, status, 14, self.accent if active else self.muted)
 
-    def draw_board(self) -> None:
+    def draw_board(self, board=None, current=None, legal=(), area_action="이동") -> None:
+        if board is None:
+            board, current, legal = self.game.board, self.game.current, self.game.legal_moves
         left, bottom, size = self.board_x, self.board_y, self.cell_size
         right, top = left + size * 8, bottom + size * 4
         self.rectangle((left, bottom, left + size * 4, top), (27, 43, 58))
         self.rectangle((left + size * 4, bottom, right, top), (51, 35, 44))
-        legal = self.game.legal_moves
         for cell in legal:
             x, y = self.cell_center(cell)
             half = size // 2 - 5
@@ -120,29 +124,28 @@ class BattleView:
             self.label(left + column * size + 40, top + 16, chr(ord("A") + column), 14, self.muted)
         for row in range(4):
             self.label(30, self.cell_center((0, row))[1], str(row + 1), 14, self.muted)
-        for piece in self.game.board.pieces:
+        for piece in board.pieces:
             x, y = self.cell_center(piece.position)
             color = self.team_color(piece.team)
-            if piece is self.game.current:
+            if current is not None and piece.identifier == current.identifier:
                 self.rectangle((x - 44, y - 44, x + 44, y + 44), self.accent, False)
                 self.rectangle((x - 43, y - 43, x + 43, y + 43), self.accent, False)
-            image = self.images[piece.identifier]
+            image = self.images[piece.image_name]
             scale = min(76 / image.w, 72 / image.h)
             image.draw(x, y + 5, image.w * scale, image.h * scale)
             self.label(x - 37, y - 35, f"{piece.identifier} {piece.name}", 14, color)
-        self.label(left, bottom - 20, "청팀 이동 영역", 14, self.blue)
-        self.label(left + 4 * size + 8, bottom - 20, "홍팀 이동 영역", 14, self.red)
+        self.label(left, bottom - 20, f"청팀 {area_action} 영역", 14, self.blue)
+        self.label(left + 4 * size + 8, bottom - 20, f"홍팀 {area_action} 영역", 14, self.red)
 
     def draw_details(self) -> None:
         piece = self.game.current
         x = 840
         self.label(x, 587, "현재 기물", 14, self.muted)
         self.label(x, 553, f"{piece.identifier}  {piece.name}", 22, self.team_color(piece.team))
-        image = self.images[piece.identifier]
+        image = self.images[piece.image_name]
         scale = min(132 / image.w, 136 / image.h)
         image.draw(956, 462, image.w * scale, image.h * scale)
-        movement = {Job.MELEE: "상하좌우 1칸", Job.RANGED: "대각선 1칸", Job.JOKER: "전 방향 1칸"}
-        self.label(x, 373, f"{piece.job.value}  /  {movement[piece.job]}", 16)
+        self.label(x, 373, f"{piece.job.value}  /  {self.movement_labels[piece.job]}", 16)
         self.label(x, 343, f"현재 위치  {self.game.cell_name(piece.position)}", 16, self.muted)
         self.label(x, 316, f"이동 가능  {len(self.game.legal_moves)}칸", 16, (145, 222, 202))
         self.rectangle(self.skip_button, (46, 57, 71))

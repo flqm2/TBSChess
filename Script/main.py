@@ -7,35 +7,34 @@ sys.dont_write_bytecode = True
 
 import pico2d
 
-from battle_view import BattleView
-from prototype import Prototype
+from game_controller import GameController, Stage
+from game_view import GameView
 
 
-def handle_event(event, game: Prototype, view: BattleView) -> bool:
+def handle_event(event, game: GameController, view: GameView) -> bool:
     """종료 요청이면 False를 반환한다."""
     if event.type == pico2d.SDL_QUIT:
         return False
     if event.type == pico2d.SDL_KEYDOWN:
         if event.key == pico2d.SDLK_ESCAPE:
             return False
-        if event.key == pico2d.SDLK_SPACE:
-            game.skip_turn()
+        if event.key == pico2d.SDLK_SPACE and game.stage is Stage.MOVEMENT:
+            game.battle.skip_turn()
+        elif event.key == pico2d.SDLK_RETURN and game.stage is not Stage.MOVEMENT:
+            game.confirm()
     elif event.type == pico2d.SDL_MOUSEMOTION:
         view.hover = view.cell_at_pixel(event.x, event.y)
     elif event.type == pico2d.SDL_MOUSEBUTTONDOWN and event.button == pico2d.SDL_BUTTON_LEFT:
-        if view.skip_at_pixel(event.x, event.y):
-            game.skip_turn()
-        else:
-            game.try_move(view.cell_at_pixel(event.x, event.y))
+        view.click(event.x, event.y)
     return True
 
 
 def main() -> None:
-    pico2d.open_canvas(BattleView.width, BattleView.height, sync=True)
+    pico2d.open_canvas(GameView.width, GameView.height, sync=True)
     view = None
     try:
-        game = Prototype()
-        view = BattleView(game)
+        game = GameController()
+        view = GameView(game)
         running = True
         while running:
             for event in pico2d.get_events():
