@@ -1,6 +1,8 @@
-"""4기 배치와 이동·턴 연결. pico2d 없이도 같은 규칙을 검증할 수 있다."""
+"""배치된 기물의 이동·턴 연결. pico2d 없이도 같은 규칙을 검증할 수 있다."""
 
 from collections import deque
+from collections.abc import Iterable
+from itertools import zip_longest
 
 from board import Board
 from movement import MovementRules
@@ -9,7 +11,7 @@ from turn_manager import TurnManager
 
 
 class Prototype:
-    def __init__(self):
+    def __init__(self, pieces: Iterable[Piece] | None = None):
         blue1 = Piece("청1", "슬레이어", Team.BLUE, Job.MELEE,
                       "남색 망토의 대검 슬레이어-1.png", (2, 1))
         blue2 = Piece("청2", "암살자", Team.BLUE, Job.JOKER,
@@ -18,10 +20,13 @@ class Prototype:
                      "은발의 푸른 마도사-6.png", (5, 1))
         red2 = Piece("홍2", "카드술사", Team.RED, Job.JOKER,
                      "라벤더 카드를 든 마법사-5.png", (6, 2))
-        self.board = Board((blue1, blue2, red1, red2))
+        self.board = Board(pieces if pieces is not None else (blue1, blue2, red1, red2))
         self.movement = MovementRules(self.board)
-        self.turns = TurnManager((blue1, red1, blue2, red2))
-        self.message = "청1 슬레이어의 이동 가능 칸을 클릭하세요."
+        blue = [piece for piece in self.board.pieces if piece.team is Team.BLUE]
+        red = [piece for piece in self.board.pieces if piece.team is Team.RED]
+        order = (piece for pair in zip_longest(blue, red) for piece in pair if piece is not None)
+        self.turns = TurnManager(order)
+        self.message = f"{self.current.identifier} {self.current.name}의 이동 가능 칸을 클릭하세요."
         self.failed = False
         self.history: deque[str] = deque(maxlen=4)
 
