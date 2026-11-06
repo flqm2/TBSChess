@@ -1,1 +1,0 @@
-print("start Pico2d")
