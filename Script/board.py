@@ -2,7 +2,7 @@
 
 from collections.abc import Iterable
 
-from piece import Piece
+from piece import Piece, Team
 
 
 class Board:
@@ -26,4 +26,10 @@ class Board:
 
     def piece_at(self, cell: tuple[int, int]) -> Piece | None:
         return next((piece for piece in self.pieces if piece.position == cell), None)
+
+    def in_territory(self, team: Team, cell: tuple[int, int]) -> bool:
+        if not self.contains(cell):
+            return False
+        midpoint = self.columns // 2
+        return cell[0] < midpoint if team is Team.BLUE else cell[0] >= midpoint
 

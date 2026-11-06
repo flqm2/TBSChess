@@ -130,8 +130,8 @@ class BattleView:
             scale = min(76 / image.w, 72 / image.h)
             image.draw(x, y + 5, image.w * scale, image.h * scale)
             self.label(x - 37, y - 35, f"{piece.identifier} {piece.name}", 14, color)
-        self.label(left, bottom - 20, "청팀 시작 영역", 14, self.blue)
-        self.label(left + 4 * size + 8, bottom - 20, "홍팀 시작 영역", 14, self.red)
+        self.label(left, bottom - 20, "청팀 이동 영역", 14, self.blue)
+        self.label(left + 4 * size + 8, bottom - 20, "홍팀 이동 영역", 14, self.red)
 
     def draw_details(self) -> None:
         piece = self.game.current
@@ -157,6 +157,6 @@ class BattleView:
         for index, entry in enumerate(self.game.history):
             self.label(40, 121 - index * 21, entry, 14, self.muted)
         self.label(840, 145, "초록 칸: 이동 가능 / 금색: 현재", 14, self.muted)
-        self.label(840, 120, "중앙선은 통과 가능한 구역 표시", 14, self.muted)
+        self.label(840, 120, "중앙 경계선 통과 불가", 14, self.muted)
         self.label(840, 95, "양 진영의 점유 칸은 진입 불가", 14, self.muted)
         self.label(40, 20, "왼쪽 클릭  이동     Space  턴 넘김     Esc  종료", 14, self.muted)

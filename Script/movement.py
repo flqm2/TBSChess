@@ -1,4 +1,4 @@
-"""직업별 한 칸 이동, 보드 외곽과 점유 충돌의 공통 판정."""
+"""직업별 한 칸 이동, 진영 경계와 점유 충돌의 공통 판정."""
 
 from board import Board
 from piece import Piece
@@ -11,6 +11,8 @@ class MovementRules:
     def rejection(self, piece: Piece, destination: tuple[int, int] | None) -> str | None:
         if destination is None or not self.board.contains(destination):
             return "보드 밖으로 이동할 수 없습니다."
+        if not self.board.in_territory(piece.team, destination):
+            return "중앙 경계선을 넘어 상대 진영으로 이동할 수 없습니다."
         if destination == piece.position:
             return "현재 위치입니다. 표시된 이동 가능 칸을 선택하세요."
         occupant = self.board.piece_at(destination)
@@ -21,7 +23,6 @@ class MovementRules:
         dy = destination[1] - piece.position[1]
         if (dx, dy) not in piece.job.directions:
             return "직업별 이동 방향으로 인접한 한 칸만 이동할 수 있습니다."
-        # 이 프로토타입의 중앙선은 구역 표시다. 정식 게임의 경계 규칙과 구별한다.
         return None
 
     def destinations(self, piece: Piece) -> tuple[tuple[int, int], ...]:
