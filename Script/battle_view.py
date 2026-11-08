@@ -6,7 +6,7 @@ from pathlib import Path
 import pico2d
 
 from character_data import CHARACTERS
-from piece import Job, Team
+from piece import Job, Piece, Team
 from prototype import Prototype
 
 
@@ -65,6 +65,14 @@ class BattleView:
 
     def team_color(self, team):
         return self.blue if team is Team.BLUE else self.red
+
+    def draw_health_bar(self, piece: Piece, x: int, y: int, width: int, height: int) -> None:
+        top = y + height - 1
+        self.rectangle((x, y, x + width - 1, top), (12, 18, 24))
+        filled = max(0, min(width, round(width * piece.current_hp / piece.max_hp)))
+        if filled:
+            color = (100, 209, 145) if piece.team is Team.BLUE else self.red
+            self.rectangle((x, y, x + filled - 1, top), color)
 
     def draw(self) -> None:
         self.rectangle((0, 0, self.width - 1, self.height - 1), self.background)
@@ -131,8 +139,9 @@ class BattleView:
                 self.rectangle((x - 44, y - 44, x + 44, y + 44), self.accent, False)
                 self.rectangle((x - 43, y - 43, x + 43, y + 43), self.accent, False)
             image = self.images[piece.image_name]
-            scale = min(76 / image.w, 72 / image.h)
-            image.draw(x, y + 5, image.w * scale, image.h * scale)
+            scale = min(76 / image.w, 62 / image.h)
+            image.draw(x, y + 11, image.w * scale, image.h * scale)
+            self.draw_health_bar(piece, x - 29, y - 26, 58, 5)
             self.label(x - 37, y - 35, f"{piece.identifier} {piece.name}", 14, color)
         self.label(left, bottom - 20, f"청팀 {area_action} 영역", 14, self.blue)
         self.label(left + 4 * size + 8, bottom - 20, f"홍팀 {area_action} 영역", 14, self.red)
@@ -146,8 +155,10 @@ class BattleView:
         scale = min(132 / image.w, 136 / image.h)
         image.draw(956, 462, image.w * scale, image.h * scale)
         self.label(x, 373, f"{piece.job.value}  /  {self.movement_labels[piece.job]}", 16)
-        self.label(x, 343, f"현재 위치  {self.game.cell_name(piece.position)}", 16, self.muted)
-        self.label(x, 316, f"이동 가능  {len(self.game.legal_moves)}칸", 16, (145, 222, 202))
+        self.label(x, 347, f"체력  {piece.current_hp} / {piece.max_hp}", 16)
+        self.draw_health_bar(piece, x, 329, 232, 7)
+        self.label(x, 309, f"위치  {self.game.cell_name(piece.position)}   /   이동 가능  {len(self.game.legal_moves)}칸",
+                   14, self.muted)
         self.rectangle(self.skip_button, (46, 57, 71))
         self.rectangle(self.skip_button, (92, 108, 125), False)
         self.label(x + 16, 266, "Space  검증용 턴 넘김", 16)

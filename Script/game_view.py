@@ -96,6 +96,7 @@ class GameView(BattleView):
             self.portrait(character, x + 122, y + 101, 122, 126)
             self.label(x + 16, y + 23, "선택 해제" if chosen else "클릭하여 선택", 14,
                        self.blue if chosen else self.muted)
+            self.label(x + 160, y + 23, f"체력 {character.max_hp}", 14, self.text)
             if chosen:
                 self.label(x + 191, y + 210, f"{selected.index(character) + 1:02}", 22, self.accent)
         self.label(840, 658, "선택한 순서", 18, self.muted)

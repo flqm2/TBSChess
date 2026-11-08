@@ -1,6 +1,6 @@
 """프로토타입 기물 데이터. 화면과 관계없이 보드 좌표로 위치를 저장한다."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 
 
@@ -33,4 +33,11 @@ class Piece:
     job: Job
     image_name: str
     position: tuple[int, int]
+    max_hp: int
+    current_hp: int = field(init=False)
+
+    def __post_init__(self) -> None:
+        if self.max_hp <= 0:
+            raise ValueError("최대 체력은 0보다 커야 합니다.")
+        self.current_hp = self.max_hp
 
