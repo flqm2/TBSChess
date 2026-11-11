@@ -37,20 +37,25 @@ class GameView(BattleView):
             battle = controller.battle
             if battle.winner is not None or self.card_revealing(battle):
                 return
+            if self.action_panel_progress(battle) < 1:
+                return
             cell = self.cell_at_pixel(x, screen_y)
-            if battle.card_target_pending and cell is not None:
-                battle.choose_card_target(cell)
-                return
-            if self.hit(self.attack_button, x, screen_y):
-                battle.open_attack()
-                return
-            if self.hit(self.move_button, x, screen_y):
-                battle.open_movement()
-                return
             if self.hit(self.pass_button, x, screen_y):
                 battle.skip_turn()
                 return
+            if battle.action_mode is None:
+                if self.hit(self.attack_button, x, screen_y):
+                    battle.open_attack()
+                elif self.hit(self.move_button, x, screen_y):
+                    battle.open_movement()
+                return
+            if self.hit(self.action_back_button, x, screen_y):
+                battle.back_to_actions()
+                return
             if battle.action_mode is ActionMode.ATTACK:
+                if battle.card_target_pending and cell is not None:
+                    battle.choose_card_target(cell)
+                    return
                 for slot in range(len(battle.skills)):
                     if self.hit(self.skill_bounds(slot), x, screen_y):
                         battle.click_skill(slot)

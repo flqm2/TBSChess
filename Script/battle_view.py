@@ -17,8 +17,11 @@ class BattleView:
     width, height = 1120, 780
     board_x, board_y, cell_size = 56, 220, 94
     skip_button = (840, 244, 1072, 288)
-    attack_button = (56, 186, 176, 215)
-    move_button = (184, 186, 304, 215)
+    action_panel = (40, 86, 1072, 212)
+    attack_button = (56, 103, 548, 195)
+    move_button = (564, 103, 1056, 195)
+    action_back_button = (828, 103, 1056, 179)
+    menu_card = (488, 149, 42, 59)
     pass_button = (840, 244, 1072, 288)
     background = (19, 25, 34)
     text = (233, 237, 241)
@@ -49,6 +52,8 @@ class BattleView:
         self._cast_started = 0.0
         self._shown_draw = None
         self._draw_started = 0.0
+        self._shown_action_mode = None
+        self._action_changed_at = None
 
     def card_revealing(self, battle: Prototype) -> bool:
         if battle.card_draw is not self._shown_draw:
@@ -227,24 +232,50 @@ class BattleView:
         left = 56 + slot * 252
         return left, 92, left + 240, 179
 
+    def action_panel_progress(self, battle: Prototype) -> float:
+        now = monotonic()
+        mode = battle.action_mode
+        if mode is not self._shown_action_mode:
+            self._shown_action_mode = mode
+            self._action_changed_at = now
+        if self._action_changed_at is None:
+            return 1.0
+        return min(1.0, (now - self._action_changed_at) / 0.16)
+
     def draw_actions(self, revealing: bool) -> None:
         if self.game.winner is not None:
             return
-        for mode, bounds, name in (
-            (ActionMode.ATTACK, self.attack_button, "공격"),
-            (ActionMode.MOVE, self.move_button, "이동"),
-        ):
-            active = self.game.action_mode is mode
-            color = self.blue if mode is ActionMode.ATTACK else (94, 177, 166)
-            enabled = mode is ActionMode.ATTACK or (self.game.legal_moves and not self.game.redraw_pending)
-            self.rectangle(bounds, (29, 57, 84) if active else (29, 38, 49))
-            self.rectangle(bounds, color if active else (84, 101, 119), False)
-            self.label(bounds[0] + 15, 200, name, 16, self.text if enabled else self.muted)
-        if self.game.action_mode is ActionMode.ATTACK:
-            self.draw_skills(revealing)
-        elif self.game.card_draw is not None:
-            image = self.card_back if revealing else self.card_faces[self.game.card_draw.suit]
-            image.draw(155, 200, 17, 24)
+        progress = self.action_panel_progress(self.game)
+        mode = self.game.action_mode
+        self.rectangle(self.action_panel, (23, 31, 41))
+        self.rectangle(self.action_panel, (84, 101, 119), False)
+        if mode is None:
+            self.draw_action_button(self.attack_button, "공격", self.blue, 30)
+            self.draw_action_button(self.move_button, "이동", (94, 177, 166), 30,
+                                    bool(self.game.legal_moves) and not self.game.redraw_pending)
+            if self.game.card_draw is not None:
+                image = self.card_back if revealing else self.card_faces[self.game.card_draw.suit]
+                image.draw(*self.menu_card)
+        else:
+            if mode is ActionMode.ATTACK:
+                self.draw_skills(revealing)
+            else:
+                self.label(66, 161, "이동", 22)
+                color = self.red if self.game.failed else self.muted
+                self.label(66, 127, self.game.message, 16, color)
+            self.draw_action_button(self.action_back_button, "뒤로가기", self.muted, 22)
+
+        if progress < 1:
+            left, bottom, right, top = self.action_panel
+            self.rectangle((left + 1, bottom + 1, right - 1, top - 1 - int((top - bottom - 2) * progress)),
+                           (23, 31, 41))
+
+    def draw_action_button(self, bounds, title, border, size, enabled=True) -> None:
+        left, bottom, right, top = bounds
+        self.rectangle(bounds, (36, 50, 65) if enabled else (29, 38, 49))
+        self.rectangle(bounds, border if enabled else (84, 101, 119), False)
+        self.label((left + right - len(title) * size) // 2, (bottom + top) // 2,
+                   title, size, self.text if enabled else self.muted)
 
     def draw_skills(self, revealing: bool = False) -> None:
         if not self.game.skills:
@@ -300,7 +331,7 @@ class BattleView:
         if progress > 0.67:
             slide = min(1.0, (progress - 0.67) / 0.33)
             slide = slide * slide * (3 - 2 * slide)
-            target = (90, 136, 48, 67) if self.game.action_mode is ActionMode.ATTACK else (155, 200, 17, 24)
+            target = (90, 136, 48, 67) if self.game.action_mode is ActionMode.ATTACK else self.menu_card
             target_x, target_y, target_width, target_height = target
             x += (target_x - x) * slide
             y += (target_y - y) * slide
@@ -336,9 +367,8 @@ class BattleView:
     def draw_footer(self, revealing: bool = False) -> None:
         color = self.red if self.game.failed and not revealing else self.text
         message = "카드를 뽑습니다." if revealing else self.game.message
-        self.label(56, 65, message, 16, color)
+        if not self.game.move_preview or revealing:
+            self.label(56, 65, message, 16, color)
         if self.game.history:
             self.label(56, 39, self.game.history[0], 14, self.muted)
-        self.label(840, 145, "초록 칸  이동 범위", 14, self.muted)
-        self.label(840, 120, "파란 칸  스킬 범위", 14, self.muted)
         self.label(840, 18, "Esc  종료", 14, self.muted)

@@ -79,7 +79,7 @@ class Prototype:
 
     @property
     def skill_preview(self) -> tuple[Cell, ...]:
-        if self.selected_skill is None:
+        if self.action_mode is not ActionMode.ATTACK or self.selected_skill is None:
             return ()
         return self.skills[self.selected_skill].cells(self.board, self.current)
 
@@ -105,13 +105,31 @@ class Prototype:
         self.selected_skill = None
         self.card_target_pending = False
         self.action_mode = ActionMode.MOVE
-        self.message, self.failed = "표시된 칸을 클릭하면 이동합니다.", False
+        self.message, self.failed = "보드에서 초록색 칸을 클릭하세요.", False
 
     def open_attack(self) -> None:
-        if self.winner is not None or self.redraw_pending or self.action_mode is ActionMode.ATTACK:
+        if self.winner is not None or self.action_mode is ActionMode.ATTACK:
+            return
+        if self.redraw_pending and not self.card_target_pending:
             return
         self.action_mode = ActionMode.ATTACK
-        self.message, self.failed = "스킬을 선택하세요.", False
+        self.message = ("파란 칸에서 클로버의 대상을 고르세요."
+                        if self.card_target_pending else "스킬을 선택하세요.")
+        self.failed = False
+
+    def back_to_actions(self) -> None:
+        if self.winner is not None or self.action_mode is None:
+            return
+        if self.redraw_pending and not self.card_target_pending:
+            return
+        self.action_mode = None
+        if self.redraw_pending:
+            self.message = "뽑은 카드의 대상을 고르려면 공격을 선택하세요."
+        else:
+            self.selected_skill = None
+            self.card_target_pending = False
+            self.message = "공격 또는 이동을 선택하세요."
+        self.failed = False
 
     def click_skill(self, slot: int) -> bool:
         skills = self.skills
