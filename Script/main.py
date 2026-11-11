@@ -18,7 +18,8 @@ def handle_event(event, game: GameController, view: GameView) -> bool:
     if event.type == pico2d.SDL_KEYDOWN:
         if event.key == pico2d.SDLK_ESCAPE:
             return False
-        if event.key == pico2d.SDLK_SPACE and game.stage is Stage.MOVEMENT:
+        if (event.key == pico2d.SDLK_SPACE and game.stage is Stage.MOVEMENT
+                and not view.card_revealing(game.battle)):
             game.battle.skip_turn()
         elif event.key == pico2d.SDLK_RETURN and game.stage is not Stage.MOVEMENT:
             game.confirm()
@@ -37,6 +38,7 @@ def main() -> None:
         view = GameView(game)
         running = True
         while running:
+            view.update()
             for event in pico2d.get_events():
                 if not handle_event(event, game, view):
                     running = False
@@ -49,6 +51,8 @@ def main() -> None:
         if view is not None:
             # SDL 렌더러가 살아 있을 때 원본 이미지의 텍스처부터 해제한다.
             view.images.clear()
+            view.card_faces.clear()
+            view.card_back = None
         pico2d.close_canvas()
 
 

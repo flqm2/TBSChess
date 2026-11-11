@@ -1,13 +1,14 @@
 """pico2d 표시와 화면 좌표 변환. 이동 판정은 Prototype의 공통 규칙을 사용한다."""
 
 import os
-from math import sin, tau
+from math import cos, pi, sin, tau
 from pathlib import Path
 from time import monotonic
 
 import pico2d
 
 from character_data import CHARACTERS
+from cards import Suit
 from piece import Job, Piece, Team
 from prototype import Prototype
 
@@ -24,6 +25,7 @@ class BattleView:
     blue = (104, 191, 242)
     red = (244, 143, 141)
     accent = (243, 211, 132)
+    card_reveal_seconds = 0.8
     movement_labels = {Job.MELEE: "상하좌우 1칸", Job.RANGED: "대각선 1칸", Job.JOKER: "전 방향 1칸"}
 
     def __init__(self, game: Prototype | None = None):
@@ -38,9 +40,20 @@ class BattleView:
             character.image_name: pico2d.load_image(str(root / "Resource" / character.image_name))
             for character in CHARACTERS
         }
+        card_dir = root / "Resource" / "Cards"
+        self.card_faces = {suit: pico2d.load_image(str(card_dir / f"ace_{suit.slug}.png")) for suit in Suit}
+        self.card_back = pico2d.load_image(str(card_dir / "back.png"))
         self.hover: tuple[int, int] | None = None
         self._shown_cast = None
         self._cast_started = 0.0
+        self._shown_draw = None
+        self._draw_started = 0.0
+
+    def card_revealing(self, battle: Prototype) -> bool:
+        if battle.card_draw is not self._shown_draw:
+            self._shown_draw = battle.card_draw
+            self._draw_started = monotonic()
+        return self._shown_draw is not None and monotonic() - self._draw_started < self.card_reveal_seconds
 
     @classmethod
     def cell_at_pixel(cls, x: int, screen_y: int) -> tuple[int, int] | None:
@@ -81,6 +94,7 @@ class BattleView:
             self.rectangle((x, y, x + filled - 1, top), color)
 
     def draw(self) -> None:
+        revealing = self.card_revealing(self.game)
         self.rectangle((0, 0, self.width - 1, self.height - 1), self.background)
         self.label(40, 735, "전략 RPG 체스", 30)
         self.label(40, 700, "이동 · 스킬", 16, self.muted)
@@ -89,8 +103,10 @@ class BattleView:
         self.draw_turn_order()
         self.draw_board()
         self.draw_details()
-        self.draw_skills()
-        self.draw_footer()
+        self.draw_skills(revealing)
+        self.draw_footer(revealing)
+        if revealing:
+            self.draw_card_reveal()
 
     def draw_turn_order(self) -> None:
         slot_width = 1040 // len(self.game.turns.order)
@@ -164,6 +180,13 @@ class BattleView:
             self.label(left + column * size + 40, top + 16, chr(ord("A") + column), 14, self.muted)
         for row in range(4):
             self.label(30, self.cell_center((0, row))[1], str(row + 1), 14, self.muted)
+        if battle is not None:
+            for box in battle.boxes:
+                if box.owner.current_hp > 0:
+                    x, y = self.cell_center(box.cell)
+                    self.rectangle((x + 11, y + 22, x + 43, y + 42), (89, 54, 104))
+                    self.rectangle((x + 11, y + 22, x + 43, y + 42), self.accent, False)
+                    self.label(x + 16, y + 32, str(box.damage), 14, self.accent)
         hit_ids = {hit.piece_id for hit in cast.hits} if cast is not None and age < 0.22 else set()
         for piece in board.living_pieces:
             x, y = self.cell_center(piece.position)
@@ -202,7 +225,7 @@ class BattleView:
         left = 56 + slot * 252
         return left, 92, left + 240, 179
 
-    def draw_skills(self) -> None:
+    def draw_skills(self, revealing: bool = False) -> None:
         if not self.game.skills:
             self.label(56, 140, "사용할 수 있는 액티브 스킬이 없습니다.", 16, self.muted)
             return
@@ -213,6 +236,10 @@ class BattleView:
             unavailable = self.game.skill_unavailable(slot)
             self.rectangle(bounds, (29, 57, 84) if selected else (29, 38, 49))
             self.rectangle(bounds, self.blue if selected else (84, 101, 119), False)
+            draw = self.game.card_draw if slot == 0 else None
+            if draw is not None:
+                self.draw_card_skill(bounds, draw.suit, skill, revealing, unavailable)
+                continue
             self.label(x, 158, skill.name, 18, self.muted if unavailable else self.text)
             if skill.damage:
                 self.label(bounds[2] - 70, 158, f"피해 {skill.damage}", 14, self.muted)
@@ -221,6 +248,44 @@ class BattleView:
             if slot == 2 and unavailable is None and not selected:
                 status = "영웅 스킬 · 클릭하여 범위 표시"
             self.label(x, 108, status, 14, self.blue if selected else self.muted)
+
+    def draw_card_skill(self, bounds, suit, skill, revealing, unavailable) -> None:
+        x = bounds[0] + 69
+        image = self.card_back if revealing else self.card_faces[suit]
+        image.draw(bounds[0] + 34, 136, 48, 67)
+        self.label(x, 160, "카드 던지기", 16)
+        if revealing:
+            self.label(x, 131, "카드 공개 중", 14, self.muted)
+            return
+        self.label(x, 142, f"{suit.label} A", 14, self.accent)
+        if suit is Suit.HEART:
+            detail = "자신 10% 회복 · 인접 피해 40" if self.game.current.hero else "인접 아군 HP 10% 회복"
+        elif suit is Suit.CLUB:
+            detail = "내 진영 빈 칸 이동" if self.game.current.hero else "아군과 위치 교환"
+        else:
+            detail = f"피해 {skill.damage}" + (" · 기절" if suit is Suit.DIAMOND else " · 2칸")
+        self.label(x, 123, detail, 14)
+        status = unavailable or "클릭하여 범위 표시"
+        if self.game.card_target_pending:
+            status = "파란 칸에서 대상 선택"
+        elif self.game.selected_skill == 0:
+            status = "다시 클릭하여 발동"
+        self.label(x, 104, status, 14, self.blue if self.game.selected_skill == 0 else self.muted)
+
+    def draw_card_reveal(self) -> None:
+        progress = min(1.0, (monotonic() - self._draw_started) / self.card_reveal_seconds)
+        x, y = 432.0, 382.0 + 46 * min(1.0, progress / 0.28)
+        width, height = 106.0, 148.0
+        if progress > 0.67:
+            slide = min(1.0, (progress - 0.67) / 0.33)
+            slide = slide * slide * (3 - 2 * slide)
+            x += (90 - x) * slide
+            y += (136 - y) * slide
+            width += (48 - width) * slide
+            height += (67 - height) * slide
+        turn = max(0.0, min(1.0, (progress - 0.25) / 0.31))
+        face = self.card_faces[self._shown_draw.suit] if turn >= 0.5 else self.card_back
+        face.draw(round(x), round(y), max(2, round(width * abs(cos(pi * turn)))), round(height))
 
     def draw_details(self) -> None:
         piece = self.game.current
@@ -247,9 +312,10 @@ class BattleView:
         self.rectangle(self.pass_button, (92, 108, 125), False)
         self.label(x + 16, 205, "턴 넘김  /  Space", 16)
 
-    def draw_footer(self) -> None:
-        color = self.red if self.game.failed else self.text
-        self.label(56, 65, self.game.message, 16, color)
+    def draw_footer(self, revealing: bool = False) -> None:
+        color = self.red if self.game.failed and not revealing else self.text
+        message = "카드를 뽑습니다." if revealing else self.game.message
+        self.label(56, 65, message, 16, color)
         if self.game.history:
             self.label(56, 39, self.game.history[0], 14, self.muted)
         self.label(840, 145, "초록 칸  이동 범위", 14, self.muted)

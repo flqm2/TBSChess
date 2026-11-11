@@ -25,11 +25,21 @@ class GameView(BattleView):
         left, bottom, right, top = bounds
         return left <= x <= right and bottom <= cls.height - 1 - screen_y <= top
 
+    def update(self) -> None:
+        if self.controller.stage is Stage.MOVEMENT:
+            battle = self.controller.battle
+            if not self.card_revealing(battle):
+                battle.resolve_redraw()
+
     def click(self, x, screen_y) -> None:
         controller = self.controller
         if controller.stage is Stage.MOVEMENT:
             battle = controller.battle
-            if battle.winner is not None:
+            if battle.winner is not None or self.card_revealing(battle):
+                return
+            cell = self.cell_at_pixel(x, screen_y)
+            if battle.card_target_pending and cell is not None:
+                battle.choose_card_target(cell)
                 return
             if self.hit(self.move_button, x, screen_y):
                 battle.open_movement()
@@ -41,7 +51,6 @@ class GameView(BattleView):
                 if self.hit(self.skill_bounds(slot), x, screen_y):
                     battle.click_skill(slot)
                     return
-            cell = self.cell_at_pixel(x, screen_y)
             if battle.move_preview and cell is not None:
                 battle.try_move(cell)
             return

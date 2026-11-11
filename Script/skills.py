@@ -17,6 +17,12 @@ class Effect(Enum):
     MARK = "표식 1개"
     RANDOM_MARK = "같은 행 무작위 · 표식 +1 · 아군 포함"
     EMPOWER = "다음 공격 적중 시 표식 +1"
+    HEAL_ALLIES = "인접 아군 최대 HP 10% 회복"
+    HEAL_STRIKE = "자신 최대 HP 10% 회복 · 인접 적 타격"
+    SWAP = "자기 진영의 아군과 위치 교환"
+    TELEPORT = "자기 진영의 빈 칸으로 이동"
+    REDRAW = "다시 뽑고 카드 던지기 발동"
+    MAGIC_BOX = "적 턴마다 전진 · 피해 +10"
 
 
 @dataclass(frozen=True)
@@ -28,6 +34,17 @@ class Skill:
 
     def cells(self, board: Board, caster: Piece) -> tuple[Cell, ...]:
         x, y = caster.position
+        if self.effect is Effect.SWAP:
+            return tuple(piece.position for piece in board.living_pieces
+                         if piece is not caster and piece.team is caster.team
+                         and board.in_territory(caster.team, piece.position))
+        if self.effect is Effect.TELEPORT:
+            return tuple((column, row) for row in range(board.rows) for column in range(board.columns)
+                         if board.in_territory(caster.team, (column, row))
+                         and board.piece_at((column, row)) is None)
+        if self.effect is Effect.MAGIC_BOX:
+            boundary = board.columns // 2
+            return ((boundary if caster.team is Team.BLUE else boundary - 1, y),)
         if self.effect is Effect.RANDOM_MARK:
             return tuple((column, y) for column in range(board.columns) if column != x)
         forward = 1 if caster.team is Team.BLUE else -1

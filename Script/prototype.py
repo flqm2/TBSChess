@@ -7,6 +7,7 @@ from itertools import zip_longest
 from random import choice
 
 from board import Board
+from cards import CARD_SKILLS, MAGIC_BOX, REDRAW, TARGETED_EFFECTS, CardDraw, MagicBox, Suit
 from movement import MovementRules
 from piece import Piece, Team
 from skills import Cell, Effect, SKILLS, Skill
@@ -41,6 +42,11 @@ class Prototype:
         self.selected_skill: int | None = None
         self.last_cast: SkillCast | None = None
         self.winner: Team | None = None
+        self.card_draw: CardDraw | None = None
+        self.redraw_pending = False
+        self.card_target_pending = False
+        self.boxes: list[MagicBox] = []
+        self._draw_turn_card()
 
     @property
     def current(self) -> Piece:
@@ -52,6 +58,9 @@ class Prototype:
 
     @property
     def skills(self) -> tuple[Skill, ...]:
+        if self.card_draw is not None:
+            throw = CARD_SKILLS[self.card_draw.suit][int(self.current.hero)]
+            return throw, REDRAW, MAGIC_BOX
         entry = SKILLS.get(self.current.character_id)
         if entry is None:
             return ()
@@ -67,6 +76,8 @@ class Prototype:
     def skill_unavailable(self, slot: int) -> str | None:
         if self.winner is not None:
             return "경기 종료"
+        if self.redraw_pending and not (slot == 0 and self.card_target_pending):
+            return "새 카드 발동 중"
         if slot == 2:
             if not self.current.hero:
                 return "영웅화 후 사용 가능"
@@ -76,18 +87,21 @@ class Prototype:
         return None
 
     def open_movement(self) -> None:
-        if self.winner is not None:
+        if self.winner is not None or self.redraw_pending:
             return
         if not self.legal_moves:
             self.message, self.failed = "이동할 수 있는 칸이 없습니다.", True
             return
         self.selected_skill = None
+        self.card_target_pending = False
         self.move_preview = True
         self.message, self.failed = "표시된 칸을 클릭하면 이동합니다.", False
 
     def click_skill(self, slot: int) -> bool:
         skills = self.skills
         if not 0 <= slot < len(skills):
+            return False
+        if self.redraw_pending:
             return False
         reason = self.skill_unavailable(slot)
         if reason is not None:
@@ -98,13 +112,61 @@ class Prototype:
         self.move_preview = False
         if not cells:
             self.selected_skill = None
-            self.message, self.failed = "보드 안에 스킬 범위가 없습니다.", True
+            self.card_target_pending = False
+            self.message = ("클로버로 선택할 대상이 없습니다." if skill.effect in TARGETED_EFFECTS
+                            else "보드 안에 스킬 범위가 없습니다.")
+            self.failed = True
             return False
         if self.selected_skill != slot:
             self.selected_skill = slot
+            self.card_target_pending = False
             self.message, self.failed = f"{skill.name} 범위. 같은 스킬 버튼을 다시 클릭해 발동하세요.", False
             return False
 
+        if skill.effect is Effect.REDRAW:
+            self.card_draw = CardDraw(choice(tuple(Suit)), redraw=True)
+            self.redraw_pending = True
+            self.selected_skill = None
+            self.message = "새 카드를 뽑습니다."
+            return True
+        if skill.effect in TARGETED_EFFECTS:
+            self._request_card_target()
+            return False
+        self._cast(slot, skill, cells)
+        return True
+
+    def _draw_turn_card(self) -> None:
+        if self.current.character_id == "cardmaster":
+            self.card_draw = CardDraw(choice(tuple(Suit)))
+            self.message = f"{self.current.identifier} 카드술사 · {self.card_draw.suit.label} A를 뽑았습니다."
+        else:
+            self.card_draw = None
+
+    def _request_card_target(self) -> None:
+        self.card_target_pending = True
+        self.selected_skill = 0
+        self.message, self.failed = "파란 칸에서 클로버의 대상을 고르세요.", False
+
+    def resolve_redraw(self) -> None:
+        if not self.redraw_pending or self.card_target_pending:
+            return
+        skill = self.skills[0]
+        cells = skill.cells(self.board, self.current)
+        if skill.effect in TARGETED_EFFECTS and cells:
+            self._request_card_target()
+            return
+        self._cast(0, skill, cells)
+
+    def choose_card_target(self, cell: Cell) -> bool:
+        if not self.card_target_pending:
+            return False
+        if cell not in self.skill_preview:
+            self.message, self.failed = "파란 칸에 있는 유효한 대상을 선택하세요.", True
+            return False
+        self._cast(0, self.skills[0], (cell,))
+        return True
+
+    def _cast(self, slot: int, skill: Skill, cells: tuple[Cell, ...]) -> None:
         caster = self.current
         self.last_cast = self._apply_skill(caster, skill, cells)
         if slot == 2:
@@ -113,13 +175,38 @@ class Prototype:
         detail = f"{len(hits)}기 피격" if hits else "명중 없음"
         if skill.effect is Effect.EMPOWER:
             detail = "다음 공격 표식 강화"
-        self._finish_action(f"{skill.name} · {detail}")
-        return True
+        elif skill.effect is Effect.HEAL_ALLIES:
+            detail = "인접 아군 회복"
+        elif skill.effect is Effect.HEAL_STRIKE:
+            detail = f"자기 회복 · {detail}"
+        elif skill.effect in TARGETED_EFFECTS:
+            detail = "위치 변경" if cells else "대상 없음"
+        elif skill.effect is Effect.MAGIC_BOX:
+            detail = f"상자 설치 · {detail}"
+        action = skill.name
+        if slot == 0 and self.card_draw is not None:
+            action = f"{'카드 뽑기 → ' if self.redraw_pending else ''}{self.card_draw.suit.label} 카드 던지기"
+        self._finish_action(f"{action} · {detail}", self.last_cast)
 
     def _apply_skill(self, caster: Piece, skill: Skill, cells: tuple[Cell, ...]) -> SkillCast:
         if skill.effect is Effect.EMPOWER:
             caster.empowered_mark = True
             return SkillCast(cells, ())
+        if skill.effect in TARGETED_EFFECTS:
+            if cells:
+                if skill.effect is Effect.SWAP:
+                    ally = self.board.piece_at(cells[0])
+                    ally.position = caster.position
+                caster.position = cells[0]
+            return SkillCast(cells, ())
+        if skill.effect is Effect.MAGIC_BOX:
+            self.boxes = [box for box in self.boxes if box.owner is not caster]
+            box = MagicBox(caster, cells[0], skill.damage)
+            self.boxes.append(box)
+            hit = self._box_hit(box)
+            return SkillCast(cells, (hit,) if hit else ())
+        if skill.effect is Effect.HEAL_STRIKE:
+            self._heal(caster)
         random_target = skill.effect is Effect.RANDOM_MARK
         if random_target:
             cells = (choice(cells),)
@@ -127,6 +214,10 @@ class Prototype:
         forward = 1 if caster.team is Team.BLUE else -1
         targets = tuple(self.board.piece_at(cell) for cell in cells)
         for target in targets:
+            if skill.effect is Effect.HEAL_ALLIES:
+                if target is not None and target.team is caster.team and target is not caster:
+                    self._heal(target)
+                continue
             if target is None or (target.team is caster.team and not random_target):
                 continue
             damage = min(target.current_hp, skill.damage)
@@ -147,22 +238,83 @@ class Prototype:
             self._shift_piece(caster, (x - forward, y))
         return SkillCast(cells, tuple(hits))
 
+    @staticmethod
+    def _heal(piece: Piece) -> None:
+        piece.current_hp = min(piece.max_hp, piece.current_hp + piece.max_hp // 10)
+
+    def _box_hit(self, box: MagicBox) -> Hit | None:
+        target = self.board.piece_at(box.cell)
+        if target is None or target.team is box.owner.team:
+            return None
+        damage = min(target.current_hp, box.damage)
+        target.current_hp -= damage
+        return Hit(target.identifier, box.cell, damage)
+
+    def _advance_boxes(self) -> SkillCast | None:
+        remaining = []
+        hits = []
+        moved = []
+        for box in self.boxes:
+            if box.owner.current_hp == 0:
+                continue
+            if box.owner.team is not self.current.team:
+                x, y = box.cell
+                x += 1 if box.owner.team is Team.BLUE else -1
+                if not self.board.in_territory(self.current.team, (x, y)):
+                    continue
+                box.cell = x, y
+                box.damage += 10
+                moved.append(box.cell)
+                hit = self._box_hit(box)
+                if hit is not None:
+                    hits.append(hit)
+                if x in (0, self.board.columns - 1):
+                    continue
+            remaining.append(box)
+        self.boxes = remaining
+        return SkillCast(tuple(moved), tuple(hits)) if moved else None
+
     def _shift_piece(self, piece: Piece, cell: Cell) -> None:
         if self.board.in_territory(piece.team, cell) and self.board.piece_at(cell) is None:
             piece.position = cell
 
-    def _finish_action(self, action: str) -> None:
+    def _finish_action(self, action: str, cast: SkillCast | None = None) -> None:
         piece = self.current
         self.history.appendleft(f"R{self.turns.round:02}  {piece.identifier} {piece.name}  {action}")
         self.selected_skill = None
         self.move_preview = False
+        self.redraw_pending = False
+        self.card_target_pending = False
         self.failed = False
+        heroes = self._update_survivors()
+        casts = [cast] if cast is not None else []
+        while self.winner is None:
+            self.turns.advance()
+            box_cast = self._advance_boxes()
+            if box_cast is not None:
+                casts.append(box_cast)
+                if box_cast.hits:
+                    heroes.extend(self._update_survivors())
+            if self.current.current_hp > 0:
+                break
+        if casts:
+            self.last_cast = SkillCast(
+                tuple(dict.fromkeys(cell for result in casts for cell in result.cells)),
+                tuple(hit for result in casts for hit in result.hits),
+            )
+        summary = " · ".join((action, *heroes))
+        if self.winner is not None:
+            self.message = f"{summary}. {'승리' if self.winner is Team.BLUE else '패배'}. {self.winner.value} 승리."
+        else:
+            self.message = f"{summary}. {self.current.identifier} {self.current.name} 차례."
+            self._draw_turn_card()
+
+    def _update_survivors(self) -> list[str]:
         living = self.board.living_pieces
         teams = {p.team for p in living}
         if len(teams) == 1:
             self.winner = next(iter(teams))
-            self.message = f"{action}. {'승리' if self.winner is Team.BLUE else '패배'}. {self.winner.value} 승리."
-            return
+            return []
         heroes = []
         for team in Team:
             survivors = [p for p in living if p.team is team]
@@ -174,12 +326,10 @@ class Prototype:
                 hero.max_hp = hero.max_hp * 13 // 10
                 hero.current_hp = min(hero.max_hp, hero.current_hp + hero.max_hp // 5)
                 heroes.append(f"{hero.identifier} 영웅화")
-        self.turns.advance()
-        summary = " · ".join((action, *heroes))
-        self.message = f"{summary}. {self.current.identifier} {self.current.name} 차례."
+        return heroes
 
     def try_move(self, destination: tuple[int, int] | None) -> bool:
-        if self.winner is not None:
+        if self.winner is not None or self.redraw_pending:
             return False
         piece = self.current
         reason = self.movement.rejection(piece, destination)
@@ -193,7 +343,7 @@ class Prototype:
         return True
 
     def skip_turn(self) -> None:
-        if self.winner is None:
+        if self.winner is None and not self.redraw_pending:
             self._finish_action("턴 넘김")
 
     @staticmethod
