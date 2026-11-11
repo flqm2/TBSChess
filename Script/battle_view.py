@@ -10,15 +10,16 @@ import pico2d
 from character_data import CHARACTERS
 from cards import Suit
 from piece import Job, Piece, Team
-from prototype import Prototype
+from prototype import ActionMode, Prototype
 
 
 class BattleView:
     width, height = 1120, 780
     board_x, board_y, cell_size = 56, 220, 94
     skip_button = (840, 244, 1072, 288)
-    move_button = (840, 244, 1072, 288)
-    pass_button = (840, 185, 1072, 225)
+    attack_button = (56, 186, 176, 215)
+    move_button = (184, 186, 304, 215)
+    pass_button = (840, 244, 1072, 288)
     background = (19, 25, 34)
     text = (233, 237, 241)
     muted = (151, 166, 183)
@@ -103,7 +104,7 @@ class BattleView:
         self.draw_turn_order()
         self.draw_board()
         self.draw_details()
-        self.draw_skills(revealing)
+        self.draw_actions(revealing)
         self.draw_footer(revealing)
         if revealing:
             self.draw_card_reveal()
@@ -210,8 +211,9 @@ class BattleView:
                 y += 8 + int(32 * age)
                 self.label(x - 19, y - 1, f"-{hit.damage}", 22, (23, 14, 20))
                 self.label(x - 20, y, f"-{hit.damage}", 22, (255, 180, 157))
-        self.label(left, bottom - 20, f"청팀 {area_action} 영역", 14, self.blue)
-        self.label(left + 4 * size + 8, bottom - 20, f"홍팀 {area_action} 영역", 14, self.red)
+        if battle is None:
+            self.label(left, bottom - 20, f"청팀 {area_action} 영역", 14, self.blue)
+            self.label(left + 4 * size + 8, bottom - 20, f"홍팀 {area_action} 영역", 14, self.red)
 
     def draw_cell_fill(self, cell, color, border) -> None:
         x, y = self.cell_center(cell)
@@ -224,6 +226,25 @@ class BattleView:
     def skill_bounds(slot: int) -> tuple[int, int, int, int]:
         left = 56 + slot * 252
         return left, 92, left + 240, 179
+
+    def draw_actions(self, revealing: bool) -> None:
+        if self.game.winner is not None:
+            return
+        for mode, bounds, name in (
+            (ActionMode.ATTACK, self.attack_button, "공격"),
+            (ActionMode.MOVE, self.move_button, "이동"),
+        ):
+            active = self.game.action_mode is mode
+            color = self.blue if mode is ActionMode.ATTACK else (94, 177, 166)
+            enabled = mode is ActionMode.ATTACK or (self.game.legal_moves and not self.game.redraw_pending)
+            self.rectangle(bounds, (29, 57, 84) if active else (29, 38, 49))
+            self.rectangle(bounds, color if active else (84, 101, 119), False)
+            self.label(bounds[0] + 15, 200, name, 16, self.text if enabled else self.muted)
+        if self.game.action_mode is ActionMode.ATTACK:
+            self.draw_skills(revealing)
+        elif self.game.card_draw is not None:
+            image = self.card_back if revealing else self.card_faces[self.game.card_draw.suit]
+            image.draw(155, 200, 17, 24)
 
     def draw_skills(self, revealing: bool = False) -> None:
         if not self.game.skills:
@@ -279,10 +300,12 @@ class BattleView:
         if progress > 0.67:
             slide = min(1.0, (progress - 0.67) / 0.33)
             slide = slide * slide * (3 - 2 * slide)
-            x += (90 - x) * slide
-            y += (136 - y) * slide
-            width += (48 - width) * slide
-            height += (67 - height) * slide
+            target = (90, 136, 48, 67) if self.game.action_mode is ActionMode.ATTACK else (155, 200, 17, 24)
+            target_x, target_y, target_width, target_height = target
+            x += (target_x - x) * slide
+            y += (target_y - y) * slide
+            width += (target_width - width) * slide
+            height += (target_height - height) * slide
         turn = max(0.0, min(1.0, (progress - 0.25) / 0.31))
         face = self.card_faces[self._shown_draw.suit] if turn >= 0.5 else self.card_back
         face.draw(round(x), round(y), max(2, round(width * abs(cos(pi * turn)))), round(height))
@@ -293,6 +316,8 @@ class BattleView:
         title = "경기 종료" if self.game.winner else ("영웅화 기물" if piece.hero else "현재 기물")
         self.label(x, 587, title, 14, self.muted)
         self.label(x, 553, f"{piece.identifier}  {piece.name}", 22, self.team_color(piece.team))
+        if piece.character_id == "assassin":
+            self.label(1006, 553, "정면 →" if piece.team is Team.BLUE else "정면 ←", 14, self.muted)
         image = self.images[piece.image_name]
         scale = min(132 / image.w, 136 / image.h)
         image.draw(956, 462, image.w * scale, image.h * scale)
@@ -304,13 +329,9 @@ class BattleView:
         if self.game.winner is not None:
             self.label(x, 267, "승리" if self.game.winner is Team.BLUE else "패배", 30, self.accent)
             return
-        self.rectangle(self.move_button, (30, 80, 70) if self.game.move_preview else (46, 57, 71))
-        self.rectangle(self.move_button, (94, 177, 166) if self.game.move_preview else (92, 108, 125), False)
-        self.label(x + 16, 266, "이동  ·  목적지 선택" if self.game.move_preview else "이동  ·  범위 표시", 16,
-                   self.text if self.game.legal_moves else self.muted)
         self.rectangle(self.pass_button, (46, 57, 71))
         self.rectangle(self.pass_button, (92, 108, 125), False)
-        self.label(x + 16, 205, "턴 넘김  /  Space", 16)
+        self.label(x + 16, 266, "턴 넘김  /  Space", 16)
 
     def draw_footer(self, revealing: bool = False) -> None:
         color = self.red if self.game.failed and not revealing else self.text

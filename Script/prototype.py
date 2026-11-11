@@ -3,6 +3,7 @@
 from collections import deque
 from collections.abc import Iterable
 from dataclasses import dataclass
+from enum import Enum, auto
 from itertools import zip_longest
 from random import choice
 
@@ -27,6 +28,11 @@ class SkillCast:
     hits: tuple[Hit, ...]
 
 
+class ActionMode(Enum):
+    ATTACK = auto()
+    MOVE = auto()
+
+
 class Prototype:
     def __init__(self, pieces: Iterable[Piece]):
         self.board = Board(pieces)
@@ -35,10 +41,10 @@ class Prototype:
         red = [piece for piece in self.board.pieces if piece.team is Team.RED]
         order = (piece for pair in zip_longest(blue, red) for piece in pair if piece is not None)
         self.turns = TurnManager(order)
-        self.message = f"{self.current.identifier} {self.current.name} 차례. 이동 또는 스킬을 선택하세요."
+        self.message = f"{self.current.identifier} {self.current.name} 차례. 공격 또는 이동을 선택하세요."
         self.failed = False
         self.history: deque[str] = deque(maxlen=4)
-        self.move_preview = False
+        self.action_mode: ActionMode | None = None
         self.selected_skill: int | None = None
         self.last_cast: SkillCast | None = None
         self.winner: Team | None = None
@@ -55,6 +61,10 @@ class Prototype:
     @property
     def legal_moves(self) -> tuple[tuple[int, int], ...]:
         return self.movement.destinations(self.current)
+
+    @property
+    def move_preview(self) -> bool:
+        return self.action_mode is ActionMode.MOVE
 
     @property
     def skills(self) -> tuple[Skill, ...]:
@@ -94,8 +104,14 @@ class Prototype:
             return
         self.selected_skill = None
         self.card_target_pending = False
-        self.move_preview = True
+        self.action_mode = ActionMode.MOVE
         self.message, self.failed = "표시된 칸을 클릭하면 이동합니다.", False
+
+    def open_attack(self) -> None:
+        if self.winner is not None or self.redraw_pending or self.action_mode is ActionMode.ATTACK:
+            return
+        self.action_mode = ActionMode.ATTACK
+        self.message, self.failed = "스킬을 선택하세요.", False
 
     def click_skill(self, slot: int) -> bool:
         skills = self.skills
@@ -109,7 +125,7 @@ class Prototype:
             return False
         skill = skills[slot]
         cells = skill.cells(self.board, self.current)
-        self.move_preview = False
+        self.action_mode = ActionMode.ATTACK
         if not cells:
             self.selected_skill = None
             self.card_target_pending = False
@@ -282,7 +298,7 @@ class Prototype:
         piece = self.current
         self.history.appendleft(f"R{self.turns.round:02}  {piece.identifier} {piece.name}  {action}")
         self.selected_skill = None
-        self.move_preview = False
+        self.action_mode = None
         self.redraw_pending = False
         self.card_target_pending = False
         self.failed = False

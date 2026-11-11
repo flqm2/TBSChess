@@ -4,7 +4,7 @@ from battle_view import BattleView
 from character_data import CHARACTERS
 from game_controller import GameController, Stage
 from piece import Team
-from prototype import Prototype
+from prototype import ActionMode, Prototype
 
 
 class GameView(BattleView):
@@ -41,16 +41,20 @@ class GameView(BattleView):
             if battle.card_target_pending and cell is not None:
                 battle.choose_card_target(cell)
                 return
+            if self.hit(self.attack_button, x, screen_y):
+                battle.open_attack()
+                return
             if self.hit(self.move_button, x, screen_y):
                 battle.open_movement()
                 return
             if self.hit(self.pass_button, x, screen_y):
                 battle.skip_turn()
                 return
-            for slot in range(len(battle.skills)):
-                if self.hit(self.skill_bounds(slot), x, screen_y):
-                    battle.click_skill(slot)
-                    return
+            if battle.action_mode is ActionMode.ATTACK:
+                for slot in range(len(battle.skills)):
+                    if self.hit(self.skill_bounds(slot), x, screen_y):
+                        battle.click_skill(slot)
+                        return
             if battle.move_preview and cell is not None:
                 battle.try_move(cell)
             return

@@ -15,7 +15,7 @@ class Effect(Enum):
     STUN = "적의 이번 라운드 차례 제거"
     RETREAT = "사용 후 뒤로 1칸"
     MARK = "표식 1개"
-    RANDOM_MARK = "같은 행 무작위 · 표식 +1 · 아군 포함"
+    RANDOM_MARK = "정면 무작위 · 표식 +1 · 아군 포함"
     EMPOWER = "다음 공격 적중 시 표식 +1"
     HEAL_ALLIES = "인접 아군 최대 HP 10% 회복"
     HEAL_STRIKE = "자신 최대 HP 10% 회복 · 인접 적 타격"
@@ -45,9 +45,10 @@ class Skill:
         if self.effect is Effect.MAGIC_BOX:
             boundary = board.columns // 2
             return ((boundary if caster.team is Team.BLUE else boundary - 1, y),)
-        if self.effect is Effect.RANDOM_MARK:
-            return tuple((column, y) for column in range(board.columns) if column != x)
         forward = 1 if caster.team is Team.BLUE else -1
+        if self.effect is Effect.RANDOM_MARK:
+            edge = board.columns if forward == 1 else -1
+            return tuple((column, y) for column in range(x + forward, edge, forward))
         candidates = ((x + distance * forward, y + row) for distance, row in self.offsets)
         return tuple(cell for cell in candidates if board.contains(cell))
 
