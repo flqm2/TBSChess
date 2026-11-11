@@ -25,7 +25,11 @@ class Board:
         return 0 <= x < self.columns and 0 <= y < self.rows
 
     def piece_at(self, cell: tuple[int, int]) -> Piece | None:
-        return next((piece for piece in self.pieces if piece.position == cell), None)
+        return next((piece for piece in self.pieces if piece.current_hp > 0 and piece.position == cell), None)
+
+    @property
+    def living_pieces(self) -> tuple[Piece, ...]:
+        return tuple(piece for piece in self.pieces if piece.current_hp > 0)
 
     def in_territory(self, team: Team, cell: tuple[int, int]) -> bool:
         if not self.contains(cell):

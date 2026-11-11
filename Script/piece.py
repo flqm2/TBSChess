@@ -34,7 +34,13 @@ class Piece:
     image_name: str
     position: tuple[int, int]
     max_hp: int
+    character_id: str = ""
     current_hp: int = field(init=False)
+    hero: bool = field(default=False, init=False)
+    hero_skill_round: int | None = field(default=None, init=False)
+    stunned_round: int = field(default=0, init=False)
+    marks: dict[str, int] = field(default_factory=dict, init=False)
+    empowered_mark: bool = field(default=False, init=False)
 
     def __post_init__(self) -> None:
         if self.max_hp <= 0:

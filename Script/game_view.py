@@ -28,10 +28,22 @@ class GameView(BattleView):
     def click(self, x, screen_y) -> None:
         controller = self.controller
         if controller.stage is Stage.MOVEMENT:
-            if self.skip_at_pixel(x, screen_y):
-                controller.battle.skip_turn()
-            else:
-                controller.battle.try_move(self.cell_at_pixel(x, screen_y))
+            battle = controller.battle
+            if battle.winner is not None:
+                return
+            if self.hit(self.move_button, x, screen_y):
+                battle.open_movement()
+                return
+            if self.hit(self.pass_button, x, screen_y):
+                battle.skip_turn()
+                return
+            for slot in range(len(battle.skills)):
+                if self.hit(self.skill_bounds(slot), x, screen_y):
+                    battle.click_skill(slot)
+                    return
+            cell = self.cell_at_pixel(x, screen_y)
+            if battle.move_preview and cell is not None:
+                battle.try_move(cell)
             return
         if self.skip_at_pixel(x, screen_y):
             controller.confirm()
@@ -63,7 +75,7 @@ class GameView(BattleView):
             return
         self.rectangle((0, 0, self.width - 1, self.height - 1), self.background)
         self.label(40, 735, "전략 RPG 체스", 30)
-        self.label(850, 735, "선택 → 배치 → 이동", 18, self.accent)
+        self.label(850, 735, "선택 → 배치 → 전투", 18, self.accent)
         if self.controller.stage is Stage.SELECTION:
             self.draw_selection()
         else:
@@ -135,9 +147,9 @@ class GameView(BattleView):
         self.label(840, 373, f"{character.job.value}  /  {self.movement_labels[character.job]}", 16)
         self.label(840, 342, f"배치 완료  {len(deployment.players)} / 4", 18, self.accent)
         self.label(840, 315, "A~D열의 빈 칸을 클릭하세요.", 14, self.muted)
-        self.button(self.skip_button, "이동 시작  /  Enter", deployment.ready)
+        self.button(self.skip_button, "전투 시작  /  Enter", deployment.ready)
         self.button(self.back_button, "캐릭터 선택으로")
         self.label(840, 145, "상대 고정 편성", 16, self.red)
         self.label(840, 119, "슬레이어 · 워리어 · 아처 · 암살자", 14, self.muted)
         self.label(840, 94, "근거리 2 / 원거리 1 / 조커 1", 14, self.muted)
-        self.label(40, 20, "클릭  기물 선택·배치     Enter  4기 배치 후 이동 시작     Esc  종료", 14, self.muted)
+        self.label(40, 20, "클릭  기물 선택·배치     Enter  4기 배치 후 전투 시작     Esc  종료", 14, self.muted)

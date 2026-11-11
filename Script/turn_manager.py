@@ -1,4 +1,4 @@
-"""고정 기물 순서와 라운드. 성공한 이동 또는 검증용 넘김만 턴을 소모한다."""
+"""고정 기물 순서와 라운드. 기절하거나 처치된 슬롯은 건너뛴다."""
 
 from collections.abc import Iterable
 
@@ -22,8 +22,13 @@ class TurnManager:
         return self.order[:self.index]
 
     def advance(self) -> None:
-        self.index += 1
-        if self.index == len(self.order):
-            self.index = 0
-            self.round += 1
+        if not any(piece.current_hp > 0 for piece in self.order):
+            return
+        while True:
+            self.index += 1
+            if self.index == len(self.order):
+                self.index = 0
+                self.round += 1
+            if self.current.current_hp > 0 and self.current.stunned_round != self.round:
+                return
 

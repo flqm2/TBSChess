@@ -76,7 +76,7 @@ class GameController:
         except ValueError as error:
             self.message, self.failed = str(error), True
             return
-        self.message = ("4기 배치 완료. 위치를 수정하거나 이동 시작을 누르세요."
+        self.message = ("4기 배치 완료. 위치를 수정하거나 전투 시작을 누르세요."
                         if self.deployment.ready else
                         f"다음은 청{self.deployment.active_index + 1} 기물입니다. 빈 칸을 클릭하세요.")
         self.failed = False

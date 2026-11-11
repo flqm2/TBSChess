@@ -15,7 +15,8 @@ class CharacterDefinition:
 
     def create_piece(self, team: Team, number: int, position: tuple[int, int]) -> Piece:
         prefix = "청" if team is Team.BLUE else "홍"
-        return Piece(f"{prefix}{number}", self.name, team, self.job, self.image_name, position, self.max_hp)
+        return Piece(f"{prefix}{number}", self.name, team, self.job, self.image_name,
+                     position, self.max_hp, character_id=self.identifier)
 
 
 CHARACTERS = (
