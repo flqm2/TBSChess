@@ -11,6 +11,7 @@ class Board:
 
     def __init__(self, pieces: Iterable[Piece]):
         self.pieces = tuple(pieces)
+        self.boundary_open = False
         identifiers = {piece.identifier for piece in self.pieces}
         positions = {piece.position for piece in self.pieces}
         if len(identifiers) != len(self.pieces):
@@ -36,4 +37,20 @@ class Board:
             return False
         midpoint = self.columns // 2
         return cell[0] < midpoint if team is Team.BLUE else cell[0] >= midpoint
+
+    def allows_movement(self, team: Team, cell: tuple[int, int]) -> bool:
+        return self.contains(cell) if self.boundary_open else self.in_territory(team, cell)
+
+    def refresh_facing(self) -> None:
+        if not self.boundary_open:
+            return
+        living = self.living_pieces
+        if len(living) != 2:
+            return
+        first, second = living
+        x, y = first.position
+        other_x, other_y = second.position
+        if y != other_y and x != other_x:
+            first.facing = 1 if other_x > x else -1
+            second.facing = -first.facing
 

@@ -9,6 +9,7 @@ from random import choice
 
 from board import Board
 from cards import CARD_SKILLS, MAGIC_BOX, REDRAW, TARGETED_EFFECTS, CardDraw, MagicBox, Suit
+from final_battle import FinalBattleRules
 from movement import MovementRules
 from passives import DamageResult, apply_damage, mage_bonus, protected_pieces
 from piece import Piece, Team
@@ -49,6 +50,8 @@ class Prototype:
         self.selected_skill: int | None = None
         self.last_cast: SkillCast | None = None
         self.winner: Team | None = None
+        self.drawn = False
+        self.final_battle: FinalBattleRules | None = None
         self.card_draw: CardDraw | None = None
         self.redraw_pending = False
         self.card_target_pending = False
@@ -57,7 +60,21 @@ class Prototype:
         self.last_stun_skips: tuple[Piece, ...] = ()
         self._revival_choices: deque[Piece] = deque()
         self._revival_cards: dict[str, Suit] = {}
+        if self._enter_final_if_ready():
+            self._update_survivors()
+            self.turns = TurnManager(self._start_final_round([]))
+            self.message = f"최종전 시작. {self.current.identifier} {self.current.name} 차례."
         self._draw_turn_card()
+
+    @property
+    def is_over(self) -> bool:
+        return self.winner is not None or self.drawn
+
+    @property
+    def result_label(self) -> str:
+        if self.drawn:
+            return "무승부"
+        return "승리" if self.winner is Team.BLUE else "패배"
 
     @property
     def current(self) -> Piece:
@@ -111,7 +128,7 @@ class Prototype:
             self._revival_cards[piece.identifier] = suit
 
     def skill_unavailable(self, slot: int) -> str | None:
-        if self.winner is not None:
+        if self.is_over:
             return "경기 종료"
         if self.revival_pending is not None:
             return "부활 카드 선택 중"
@@ -126,7 +143,7 @@ class Prototype:
         return None
 
     def open_movement(self) -> None:
-        if self.winner is not None or self.redraw_pending or self.revival_pending is not None:
+        if self.is_over or self.redraw_pending or self.revival_pending is not None:
             return
         if not self.legal_moves:
             self.message, self.failed = "이동할 수 있는 칸이 없습니다.", True
@@ -137,7 +154,7 @@ class Prototype:
         self.message, self.failed = "보드에서 초록색 칸을 클릭하세요.", False
 
     def open_attack(self) -> None:
-        if (self.winner is not None or self.revival_pending is not None
+        if (self.is_over or self.revival_pending is not None
                 or self.action_mode is ActionMode.ATTACK):
             return
         if self.redraw_pending and not self.card_target_pending:
@@ -148,7 +165,7 @@ class Prototype:
         self.failed = False
 
     def back_to_actions(self) -> None:
-        if self.winner is not None or self.action_mode is None:
+        if self.is_over or self.action_mode is None:
             return
         if self.redraw_pending and not self.card_target_pending:
             return
@@ -276,7 +293,7 @@ class Prototype:
         if random_target:
             cells = (choice(cells),)
         hits = []
-        forward = 1 if caster.team is Team.BLUE else -1
+        forward = caster.facing
         targets = tuple(self.board.piece_at(cell) for cell in cells)
         protected = protected_pieces(self.board)
         for target in targets:
@@ -294,7 +311,10 @@ class Prototype:
                 caster.empowered_mark = False
             if target.current_hp > 0 and not result.revived:
                 if skill.effect is Effect.STUN:
-                    target.stunned = True
+                    if self.final_battle is None:
+                        target.stunned = True
+                    elif not self.final_battle.apply_stun(target):
+                        self.combat_notices.append(("기절 면역", f"{target.identifier} {target.name}"))
                 elif skill.effect is Effect.PULL:
                     x, y = target.position
                     self._shift_piece(target, (x - forward, y))
@@ -348,8 +368,31 @@ class Prototype:
         return SkillCast(tuple(moved), tuple(hits)) if moved else None
 
     def _shift_piece(self, piece: Piece, cell: Cell) -> None:
-        if self.board.in_territory(piece.team, cell) and self.board.piece_at(cell) is None:
+        if self.board.allows_movement(piece.team, cell) and self.board.piece_at(cell) is None:
             piece.position = cell
+
+    def _enter_final_if_ready(self) -> bool:
+        if self.final_battle is not None or self.is_over:
+            return False
+        living = self.board.living_pieces
+        if len(living) != 2 or living[0].team is living[1].team:
+            return False
+        blue, red = living if living[0].team is Team.BLUE else living[::-1]
+        self.final_battle = FinalBattleRules(blue, red)
+        self.board.boundary_open = True
+        self.board.refresh_facing()
+        self.combat_notices.append(("최종전", "중앙 경계가 해제됩니다."))
+        return True
+
+    def _start_final_round(self, casts: list[SkillCast]) -> tuple[Piece, ...]:
+        order, damage = self.final_battle.start_round()
+        self.winner = self.final_battle.winner
+        self.drawn = self.final_battle.drawn
+        if damage:
+            hits = tuple(Hit(piece.identifier, piece.position, lost) for piece, lost in damage)
+            casts.append(SkillCast((), hits))
+            self.combat_notices.append(("서든데스", "양 진영에 최대 체력의 10% 피해"))
+        return order
 
     def _finish_action(self, action: str, cast: SkillCast | None = None) -> None:
         piece = self.current
@@ -361,17 +404,23 @@ class Prototype:
         self.failed = False
         heroes = self._update_survivors()
         casts = [cast] if cast is not None else []
+        restart_round = self._enter_final_if_ready()
+        self.board.refresh_facing()
         stun_skips = []
-        while self.winner is None:
-            for skipped in self.turns.advance():
+        while not self.is_over:
+            next_round = (lambda: self._start_final_round(casts)) if self.final_battle else None
+            for skipped in self.turns.advance(next_round, restart_round=restart_round):
                 stun_skips.append(skipped)
                 self.combat_notices.append(("기절", f"{skipped.identifier} {skipped.name} · 차례를 건너뜁니다."))
+            if self.is_over:
+                break
             box_cast = self._advance_boxes()
             if box_cast is not None:
                 casts.append(box_cast)
                 if box_cast.hits:
                     heroes.extend(self._update_survivors())
-            if self.current.current_hp > 0:
+            restart_round = self._enter_final_if_ready()
+            if not restart_round and self.current.current_hp > 0:
                 break
         self.last_stun_skips = tuple(stun_skips)
         if casts:
@@ -380,8 +429,10 @@ class Prototype:
                 tuple(hit for result in casts for hit in result.hits),
             )
         summary = " · ".join((action, *heroes))
-        if self.winner is not None:
-            self.message = f"{summary}. {'승리' if self.winner is Team.BLUE else '패배'}. {self.winner.value} 승리."
+        if self.is_over:
+            self.card_draw = None
+            result = f"{self.winner.value} 승리" if self.winner else self.result_label
+            self.message = f"{summary}. {result}."
         else:
             self.message = f"{summary}. {self.current.identifier} {self.current.name} 차례."
             self._draw_turn_card()
@@ -389,24 +440,29 @@ class Prototype:
     def _update_survivors(self) -> list[str]:
         living = self.board.living_pieces
         teams = {p.team for p in living}
+        if not teams:
+            self.drawn = True
+            return []
         if len(teams) == 1:
             self.winner = next(iter(teams))
             return []
         heroes = []
         for team in Team:
             survivors = [p for p in living if p.team is team]
-            if len(survivors) != 1 or not any(p.team is team and p.current_hp == 0 for p in self.board.pieces):
+            has_fallen = any(p.team is team and p.current_hp == 0 for p in self.board.pieces)
+            if len(survivors) != 1 or (len(living) != 2 and not has_fallen):
                 continue
             hero = survivors[0]
             if not hero.hero:
                 hero.hero = True
-                hero.max_hp = hero.max_hp * 13 // 10
-                hero.current_hp = min(hero.max_hp, hero.current_hp + hero.max_hp // 5)
+                old_max = hero.max_hp
+                hero.max_hp = old_max * 13 // 10
+                hero.current_hp = min(hero.max_hp, (65 * hero.current_hp + 13 * old_max) // 50)
                 heroes.append(f"{hero.identifier} 영웅화")
         return heroes
 
     def try_move(self, destination: tuple[int, int] | None) -> bool:
-        if self.winner is not None or self.redraw_pending or self.revival_pending is not None:
+        if self.is_over or self.redraw_pending or self.revival_pending is not None:
             return False
         piece = self.current
         reason = self.movement.rejection(piece, destination)
@@ -420,7 +476,7 @@ class Prototype:
         return True
 
     def skip_turn(self) -> None:
-        if self.winner is None and not self.redraw_pending and self.revival_pending is None:
+        if not self.is_over and not self.redraw_pending and self.revival_pending is None:
             self._finish_action("턴 넘김")
 
     @staticmethod

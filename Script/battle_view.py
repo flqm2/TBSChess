@@ -21,12 +21,11 @@ class BattleView:
     board_x, board_y = 94, 306
     cell_width, cell_height = 204, 135
     action_panel = (460, 89, 1726, 228)
-    attack_button = (460, 89, 870, 228)
-    move_button = (888, 89, 1298, 228)
-    pass_button = (1316, 89, 1726, 228)
+    attack_button = (460, 89, 1084, 228)
+    move_button = (1102, 89, 1726, 228)
+    pass_button = (1528, 24, 1726, 64)
     action_back_button = (1498, 89, 1726, 228)
-    submenu_pass_button = (1528, 24, 1726, 64)
-    menu_card = (796, 159, 52, 73)
+    menu_card = (1008, 159, 52, 73)
     passive_icon = (228, 91, 344, 123)
     background = (19, 25, 34)
     text = (233, 237, 241)
@@ -110,7 +109,7 @@ class BattleView:
         pico2d.TTF_SizeUTF8(self.fonts[size].font, text.encode("utf-8"), byref(width), None)
         self.label(x - width.value // 2, y, text, size, color)
 
-    def portrait(self, character, x, y, max_width, max_height, grayscale=False):
+    def portrait(self, character, x, y, max_width, max_height, grayscale=False, mirrored=False):
         name = character.image_name
         if grayscale:
             if name not in self.grayscale_portraits:
@@ -119,7 +118,10 @@ class BattleView:
         else:
             image = self.images[name]
         scale = min(max_width / image.w, max_height / image.h)
-        image.draw(x, y, image.w * scale, image.h * scale)
+        if mirrored:
+            image.composite_draw(0, "h", x, y, image.w * scale, image.h * scale)
+        else:
+            image.draw(x, y, image.w * scale, image.h * scale)
 
     def team_color(self, team):
         return self.blue if team is Team.BLUE else self.red
@@ -150,11 +152,22 @@ class BattleView:
 
     def draw_health_and_round(self) -> None:
         center = self.width // 2
-        self.centered_label(center, 1010, "라운드", 22, self.muted)
-        self.centered_label(center, 954, f"{self.game.turns.round:02}", 46, self.accent)
+        final = self.game.final_battle
+        if final is None:
+            self.centered_label(center, 1010, "라운드", 22, self.muted)
+            self.centered_label(center, 954, f"{self.game.turns.round:02}", 46, self.accent)
+        else:
+            title = "최종전 · 서든데스" if final.sudden_death else "최종전 · 경계 해제"
+            self.centered_label(center, 1010, title, 22, self.accent)
+            self.centered_label(center, 954, f"{final.round:02}", 46, self.accent)
+            if final.dice:
+                blue, red = final.dice
+                first = "청팀" if blue > red else "홍팀"
+                self.centered_label(center, 907, f"주사위  청팀 {blue} · 홍팀 {red}  /  {first} 선공",
+                                    18, self.muted)
         team_left = {Team.BLUE: self.board_x, Team.RED: self.width - self.board_x - 480}
         team_slots = {team: 0 for team in Team}
-        for piece in self.game.turns.order:
+        for piece in self.game.board.pieces:
             left = team_left[piece.team]
             y = 1024 - team_slots[piece.team] * 38
             team_slots[piece.team] += 1
@@ -168,7 +181,9 @@ class BattleView:
         order = self.game.turns.upcoming
         identifiers = tuple(piece.identifier for piece in order)
         if identifiers != self._stack_order:
-            previous_slots = {identifier: index for index, identifier in enumerate(self._stack_order)}
+            previous_slots = {}
+            if set(identifiers) == set(self._stack_order):
+                previous_slots = {identifier: index for index, identifier in enumerate(self._stack_order)}
             self._stack_from = tuple(previous_slots.get(key, index) for index, key in enumerate(identifiers))
             self._stack_order = identifiers
             self._stack_started = now
@@ -178,7 +193,7 @@ class BattleView:
                 self._stun_visible_until[piece.identifier] = now + 1.2
 
         progress = min(1.0, (now - self._stack_started) / 0.24)
-        remaining = (1 - progress) ** 2
+        remaining = 0 if self.game.is_over else (1 - progress) ** 2
         x = (self.board_x + 8 * self.cell_width + self.width) // 2
         step, first_y = 77, 802
         rail = (x - 65, first_y - step * (len(order) - 1) - 44, x + 65, first_y + 44)
@@ -193,7 +208,7 @@ class BattleView:
             if start >= index:
                 y -= round(step * (start - index) * remaining)
             portrait_x = x + round(12 * remaining) if start < index else x
-            active = piece is self.game.current and self.game.winner is None
+            active = piece is self.game.current and not self.game.is_over
             alive = piece.current_hp > 0
             if active:
                 self._stun_visible_until.pop(piece.identifier, None)
@@ -222,7 +237,7 @@ class BattleView:
         now = monotonic()
         if battle is not None:
             board = battle.board
-            current = battle.current if battle.winner is None else None
+            current = battle.current if not battle.is_over else None
             legal = battle.legal_moves if battle.move_preview else ()
             attack = battle.skill_preview
             if battle.last_cast is not self._shown_cast:
@@ -235,8 +250,11 @@ class BattleView:
         width, height = self.cell_width, self.cell_height
         boundary = left + width * 4
         right, top = left + width * 8, bottom + height * 4
-        self.rectangle((left, bottom, boundary, top), (27, 43, 58))
-        self.rectangle((boundary, bottom, right, top), (51, 35, 44))
+        if board.boundary_open:
+            self.rectangle((left, bottom, right, top), (31, 42, 50))
+        else:
+            self.rectangle((left, bottom, boundary, top), (27, 43, 58))
+            self.rectangle((boundary, bottom, right, top), (51, 35, 44))
         if battle is not None:
             for warrior in board.living_pieces:
                 if warrior.character_id != "warrior":
@@ -264,8 +282,9 @@ class BattleView:
         for row in range(5):
             y = bottom + row * height
             pico2d.draw_line(left, y, right, y, 86, 99, 113)
-        for offset in (-1, 0, 1):
-            pico2d.draw_line(boundary + offset, bottom, boundary + offset, top, *self.accent)
+        if not board.boundary_open:
+            for offset in (-1, 0, 1):
+                pico2d.draw_line(boundary + offset, bottom, boundary + offset, top, *self.accent)
         for column in range(8):
             self.centered_label(self.cell_center((column, 0))[0], top + 19, chr(ord("A") + column), 16, self.muted)
         for row in range(4):
@@ -286,8 +305,11 @@ class BattleView:
             if active:
                 self.rectangle(self.cell_bounds(piece.position, 3), self.accent, False)
             shake = int(5 * sin(age * 65)) if piece.identifier in hit_ids else 0
-            self.portrait(piece, x + shake, y + 3, 126, 88)
-            self.centered_label(x, y - 49, f"{piece.identifier} {piece.name}", 16, color)
+            self.portrait(piece, x + shake, y + 3, 126, 88, mirrored=board.boundary_open and piece.facing < 0)
+            name = f"{piece.identifier} {piece.name}"
+            if board.boundary_open:
+                name += "  →" if piece.facing > 0 else "  ←"
+            self.centered_label(x, y - 49, name, 16, color)
             if battle is not None and active:
                 self.centered_label(x, y + 54 + int(4 * sin(now * tau / 0.8)), "▼", 18, self.accent)
             if battle is not None and piece.marks:
@@ -337,7 +359,7 @@ class BattleView:
         return min(1.0, (now - self._action_changed_at) / 0.16)
 
     def draw_actions(self, revealing: bool) -> None:
-        if self.game.winner is not None:
+        if self.game.is_over:
             return
         progress = self.action_panel_progress(self.game)
         mode = self.game.action_mode
@@ -346,7 +368,6 @@ class BattleView:
             self.draw_action_button(self.attack_button, "공격", self.blue, 32)
             self.draw_action_button(self.move_button, "이동", (94, 177, 166), 32,
                                     bool(self.game.legal_moves) and not self.game.redraw_pending)
-            self.draw_action_button(self.pass_button, "턴 넘김", self.muted, 32)
             if self.game.card_draw is not None:
                 image = self.card_back if revealing else self.card_faces[self.game.card_draw.suit]
                 image.draw(*self.menu_card)
@@ -357,7 +378,7 @@ class BattleView:
                 self.label(486, 170, "이동", 26)
                 self.label(486, 131, "보드에서 표시된 칸을 클릭하세요.", 20, self.muted)
             self.draw_action_button(self.action_back_button, "뒤로가기", self.muted, 22)
-            self.draw_action_button(self.submenu_pass_button, "턴 넘김 / Space", self.muted, 16)
+        self.draw_action_button(self.pass_button, "턴 넘김 / Space", self.muted, 16)
 
         if progress < 1:
             left, bottom, right, top = self.action_panel
@@ -441,25 +462,29 @@ class BattleView:
         face.draw(round(x), round(y), max(2, round(width * abs(cos(pi * turn)))), round(height))
 
     def draw_details(self) -> None:
+        if self.game.is_over:
+            blue = sum(piece.team is Team.BLUE for piece in self.game.board.living_pieces)
+            red = len(self.game.board.living_pieces) - blue
+            self.label(460, 166, self.game.result_label, 46, self.accent)
+            self.label(460, 112, f"생존 기물  청팀 {blue}기 · 홍팀 {red}기", 20, self.muted)
+            return
         piece = self.game.current
         x = 228
-        title = "경기 종료" if self.game.winner else ("영웅화 기물" if piece.hero else "현재 기물")
+        title = "영웅화 기물" if piece.hero else "현재 기물"
         self.label(x, 230, title, 16, self.muted)
         self.label(x, 196, f"{piece.identifier}  {piece.name}", 26, self.team_color(piece.team))
-        if piece.character_id == "assassin":
-            self.label(x, 67, "정면 →" if piece.team is Team.BLUE else "정면 ←", 16, self.muted)
+        if piece.character_id == "assassin" or self.game.final_battle:
+            self.label(x, 67, "정면 →" if piece.facing > 0 else "정면 ←", 16, self.muted)
         pico2d.draw_circle(124, 144, 86, 30, 43, 56, filled=True)
         pico2d.draw_circle(124, 144, 86, *self.team_color(piece.team), filled=False)
         self.portrait(piece, 124, 144, 139, 148)
         self.label(x, 160, f"{piece.job.value} / {self.movement_labels[piece.job]}", 18)
         self.label(x, 138, f"{self.game.cell_name(piece.position)} / 이동 가능 {len(self.game.legal_moves)}칸",
                    16, self.muted)
-        if self.game.winner is not None:
-            self.label(460, 166, "승리" if self.game.winner is Team.BLUE else "패배", 46, self.accent)
 
     def draw_passive_icon(self, piece: Piece) -> None:
         lines = DESCRIPTIONS.get(piece.character_id)
-        if not lines or self.game.winner is not None:
+        if not lines or self.game.is_over:
             return
         color = (213, 176, 246) if not piece.passive_used or piece.shield else self.muted
         self.rectangle(self.passive_icon, (54, 42, 73))

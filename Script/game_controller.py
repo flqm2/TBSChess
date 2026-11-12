@@ -3,6 +3,7 @@
 from enum import Enum
 
 from deployment import Deployment
+from piece import Piece
 from prototype import Prototype
 from roster import RosterSelection
 
@@ -46,9 +47,12 @@ class GameController:
             if not self.deployment.ready:
                 self.message, self.failed = "선택한 4기를 모두 배치해야 시작할 수 있습니다.", True
                 return
-            self.battle = Prototype((*self.deployment.players, *self.deployment.enemies))
-            self.stage = Stage.MOVEMENT
+            self.start_battle((*self.deployment.players, *self.deployment.enemies))
         self.failed = False
+
+    def start_battle(self, pieces: tuple[Piece, ...]) -> None:
+        self.battle = Prototype(pieces)
+        self.stage = Stage.MOVEMENT
 
     def back_to_selection(self) -> None:
         if self.stage is Stage.DEPLOYMENT:

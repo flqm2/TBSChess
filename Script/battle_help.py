@@ -85,7 +85,7 @@ class BattleHelp:
 
         piece = self.pieces[self.selected]
         grid_x = x + 322
-        facing = "오른쪽 →" if piece.team is Team.BLUE else "← 왼쪽"
+        facing = "오른쪽 →" if piece.facing > 0 else "← 왼쪽"
         column, row = piece.position
         hero = "  /  영웅화" if piece.hero else ""
         view.label(grid_x, y + 502,
@@ -115,6 +115,8 @@ class BattleHelp:
                 count = sum(cell in cells for _, cells in ranges)
                 if count:
                     fill = self.overlap if count > 1 else self.attack
+                elif self.board.boundary_open:
+                    fill = (31, 42, 50)
                 else:
                     fill = (27, 43, 58) if self.board.in_territory(Team.BLUE, cell) else (51, 37, 46)
                 view.rectangle(bounds, fill)
@@ -122,9 +124,11 @@ class BattleHelp:
                 occupant = self.board.piece_at(cell)
                 if occupant is piece:
                     view.rectangle((left + 2, bottom + 2, left + size - 2, bottom + size - 2), view.accent, False)
-                    view.portrait(piece, left + size // 2, bottom + 47, 54, 53)
+                    view.portrait(piece, left + size // 2, bottom + 47, 54, 53,
+                                  mirrored=self.board.boundary_open and piece.facing < 0)
                     view.centered_label(left + size // 2, bottom + 14, piece.identifier, 14, view.accent)
                 elif occupant is not None:
                     view.label(left + 8, bottom + 14, occupant.identifier, 14, view.team_color(occupant.team))
-        boundary = x + self.board.columns // 2 * size
-        view.rectangle((boundary, top - self.board.rows * size, boundary + 1, top), view.accent)
+        if not self.board.boundary_open:
+            boundary = x + self.board.columns // 2 * size
+            view.rectangle((boundary, top - self.board.rows * size, boundary + 1, top), view.accent)

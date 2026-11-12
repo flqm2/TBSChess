@@ -1,6 +1,6 @@
-"""고정 기물 순서와 라운드. 기절하거나 처치된 슬롯은 건너뛴다."""
+"""기물 순서와 라운드. 기절하거나 처치된 슬롯은 건너뛴다."""
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 
 from piece import Piece
 
@@ -25,15 +25,23 @@ class TurnManager:
     def upcoming(self) -> tuple[Piece, ...]:
         return self.order[self.index:] + self.acted
 
-    def advance(self) -> tuple[Piece, ...]:
+    def advance(self, next_round: Callable[[], tuple[Piece, ...]] | None = None,
+                *, restart_round: bool = False) -> tuple[Piece, ...]:
         if not any(piece.current_hp > 0 for piece in self.order):
             return ()
         skipped = []
+        if restart_round:
+            self.index = len(self.order) - 1
         while True:
             self.index += 1
             if self.index == len(self.order):
                 self.index = 0
                 self.round += 1
+                if next_round is not None:
+                    order = next_round()
+                    if not order:
+                        return tuple(skipped)
+                    self.order = order
             piece = self.current
             if piece.current_hp == 0:
                 continue

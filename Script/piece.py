@@ -36,6 +36,7 @@ class Piece:
     max_hp: int
     character_id: str = ""
     current_hp: int = field(init=False)
+    facing: int = field(init=False)
     hero: bool = field(default=False, init=False)
     hero_skill_round: int | None = field(default=None, init=False)
     stunned: bool = field(default=False, init=False)
@@ -48,4 +49,5 @@ class Piece:
         if self.max_hp <= 0:
             raise ValueError("최대 체력은 0보다 커야 합니다.")
         self.current_hp = self.max_hp
+        self.facing = 1 if self.team is Team.BLUE else -1
 

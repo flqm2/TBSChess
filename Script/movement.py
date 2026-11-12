@@ -11,7 +11,7 @@ class MovementRules:
     def rejection(self, piece: Piece, destination: tuple[int, int] | None) -> str | None:
         if destination is None or not self.board.contains(destination):
             return "보드 밖으로 이동할 수 없습니다."
-        if not self.board.in_territory(piece.team, destination):
+        if not self.board.allows_movement(piece.team, destination):
             return "중앙 경계선을 넘어 상대 진영으로 이동할 수 없습니다."
         if destination == piece.position:
             return "현재 위치입니다. 표시된 이동 가능 칸을 선택하세요."

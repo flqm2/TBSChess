@@ -64,13 +64,12 @@ class GameView(BattleView):
                         battle.choose_revival_card(suit)
                         break
                 return
-            if battle.winner is not None or self.card_revealing(battle):
+            if battle.is_over or self.card_revealing(battle):
                 return
             if self.action_panel_progress(battle) < 1:
                 return
             cell = self.cell_at_pixel(x, screen_y)
-            pass_button = self.pass_button if battle.action_mode is None else self.submenu_pass_button
-            if self.hit(pass_button, x, screen_y):
+            if self.hit(self.pass_button, x, screen_y):
                 battle.skip_turn()
                 return
             if battle.action_mode is None:

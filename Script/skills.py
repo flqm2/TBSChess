@@ -4,9 +4,10 @@ from dataclasses import dataclass
 from enum import Enum
 
 from board import Board
-from piece import Piece, Team
+from piece import Job, Piece, Team
 
 Cell = tuple[int, int]
+FINAL_RANGE_SHORTENING = {Job.RANGED: 2, Job.JOKER: 1}
 
 
 class Effect(Enum):
@@ -45,11 +46,15 @@ class Skill:
         if self.effect is Effect.MAGIC_BOX:
             boundary = board.columns // 2
             return ((boundary if caster.team is Team.BLUE else boundary - 1, y),)
-        forward = 1 if caster.team is Team.BLUE else -1
+        forward = caster.facing
+        shortening = 0
+        if board.boundary_open and self.effect not in (Effect.HEAL_ALLIES, Effect.HEAL_STRIKE, Effect.REDRAW, Effect.EMPOWER):
+            shortening = FINAL_RANGE_SHORTENING.get(caster.job, 0)
         if self.effect is Effect.RANDOM_MARK:
             edge = board.columns if forward == 1 else -1
-            return tuple((column, y) for column in range(x + forward, edge, forward))
-        candidates = ((x + distance * forward, y + row) for distance, row in self.offsets)
+            return tuple((column, y) for column in range(x + forward, edge - shortening * forward, forward))
+        candidates = ((x + (distance - shortening) * forward, y + row)
+                      for distance, row in self.offsets if not shortening or distance > shortening)
         return tuple(cell for cell in candidates if board.contains(cell))
 
 

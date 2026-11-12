@@ -57,14 +57,15 @@ def handle_event(event, game: GameController, view: GameView) -> bool:
     return True
 
 
-def main() -> None:
+def main(game: GameController | None = None) -> None:
     pico2d.SDL_SetHint(pico2d.SDL_HINT_RENDER_SCALE_QUALITY, b"1")
     pico2d.SDL_SetHint(pico2d.SDL_HINT_RENDER_LINE_METHOD, b"3")
     pico2d.open_canvas(GameView.width, GameView.height, sync=True)
     view = None
     try:
         fit_canvas(GameView.width, GameView.height)
-        game = GameController()
+        if game is None:
+            game = GameController()
         view = GameView(game)
         running = True
         while running:
