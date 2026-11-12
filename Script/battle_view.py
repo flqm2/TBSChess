@@ -9,6 +9,7 @@ import pico2d
 
 from character_data import CHARACTERS
 from cards import Suit
+from passives import DESCRIPTIONS, aura_cells
 from piece import Job, Piece, Team
 from prototype import ActionMode, Prototype
 
@@ -23,6 +24,7 @@ class BattleView:
     action_back_button = (828, 103, 1056, 179)
     menu_card = (488, 149, 42, 59)
     pass_button = (840, 244, 1072, 288)
+    passive_icon = (1002, 569, 1072, 596)
     background = (19, 25, 34)
     text = (233, 237, 241)
     muted = (151, 166, 183)
@@ -39,7 +41,7 @@ class BattleView:
         font = next((p for p in (fonts / "malgun.ttf", fonts / "gulim.ttc") if p.is_file()), None)
         if font is None:
             raise FileNotFoundError("한국어 표시를 위한 맑은 고딕 또는 굴림 글꼴이 필요합니다.")
-        self.fonts = {size: pico2d.load_font(str(font), size) for size in (14, 16, 18, 22, 30)}
+        self.fonts = {size: pico2d.load_font(str(font), size) for size in (12, 14, 16, 18, 22, 30)}
         self.images = {
             character.image_name: pico2d.load_image(str(root / "Resource" / character.image_name))
             for character in CHARACTERS
@@ -48,12 +50,21 @@ class BattleView:
         self.card_faces = {suit: pico2d.load_image(str(card_dir / f"ace_{suit.slug}.png")) for suit in Suit}
         self.card_back = pico2d.load_image(str(card_dir / "back.png"))
         self.hover: tuple[int, int] | None = None
+        self.passive_hovered = False
         self._shown_cast = None
         self._cast_started = 0.0
         self._shown_draw = None
         self._draw_started = 0.0
         self._shown_action_mode = None
         self._action_changed_at = None
+        self._notice_battle = None
+        self._notice_index = -1
+        self._notice_until = 0.0
+
+    def point_at(self, x: int, screen_y: int) -> None:
+        self.hover = self.cell_at_pixel(x, screen_y)
+        left, bottom, right, top = self.passive_icon
+        self.passive_hovered = left <= x <= right and bottom <= self.height - 1 - screen_y <= top
 
     def card_revealing(self, battle: Prototype) -> bool:
         if battle.card_draw is not self._shown_draw:
@@ -111,7 +122,10 @@ class BattleView:
         self.draw_details()
         self.draw_actions(revealing)
         self.draw_footer(revealing)
-        if revealing:
+        self.draw_passive_notice()
+        if self.game.revival_pending is not None:
+            self.draw_revival_choices()
+        elif revealing:
             self.draw_card_reveal()
 
     def draw_turn_order(self) -> None:
@@ -156,6 +170,15 @@ class BattleView:
         right, top = left + size * 8, bottom + size * 4
         self.rectangle((left, bottom, left + size * 4, top), (27, 43, 58))
         self.rectangle((left + size * 4, bottom, right, top), (51, 35, 44))
+        if battle is not None:
+            for warrior in board.living_pieces:
+                if warrior.character_id != "warrior":
+                    continue
+                for cell in aura_cells(board, warrior):
+                    x, y = self.cell_center(cell)
+                    half = size // 2 - 2
+                    tint = (37, 56, 62) if cell[0] < 4 else (61, 48, 55)
+                    self.rectangle((x - half, y - half, x + half, y + half), tint)
         for cell in legal:
             x, y = self.cell_center(cell)
             half = size // 2 - 5
@@ -209,7 +232,13 @@ class BattleView:
             if battle is not None and active:
                 self.label(x - 8, y + 42 + int(4 * sin(now * tau / 0.8)), "▼", 16, self.accent)
             if battle is not None and piece.marks:
-                self.label(x + 22, y + 27, str(sum(piece.marks.values())), 14, (221, 165, 245))
+                self.rectangle((x + 9, y + 17, x + 43, y + 35), (66, 38, 88))
+                self.label(x + 13, y + 26, f"◆ {sum(piece.marks.values())}", 14, (238, 192, 255))
+        if battle is not None:
+            for cell, percent in battle.mage_preview:
+                x, y = self.cell_center(cell)
+                self.rectangle((x - 46, y + 26, x + 46, y + 45), (23, 39, 58))
+                self.label(x - 44, y + 35, f"+{percent}% 추가 피해", 12, self.accent)
         if cast is not None:
             for hit in cast.hits:
                 x, y = self.cell_center(hit.cell)
@@ -363,6 +392,56 @@ class BattleView:
         self.rectangle(self.pass_button, (46, 57, 71))
         self.rectangle(self.pass_button, (92, 108, 125), False)
         self.label(x + 16, 266, "턴 넘김  /  Space", 16)
+        self.draw_passive_icon(piece)
+
+    def draw_passive_icon(self, piece: Piece) -> None:
+        lines = DESCRIPTIONS.get(piece.character_id)
+        if not lines:
+            return
+        color = (213, 176, 246) if not piece.passive_used or piece.shield else self.muted
+        self.rectangle(self.passive_icon, (54, 42, 73))
+        self.rectangle(self.passive_icon, color, False)
+        self.label(1008, 582, "◆ 패시브", 14, color)
+        if self.passive_hovered:
+            top = 532
+            status = "보호막 활성" if piece.shield else ("이번 경기에서 사용함" if piece.passive_used else "")
+            rows = (*lines, status) if status else lines
+            self.rectangle((816, top - 16 - 22 * len(rows), 1072, top), (26, 25, 43))
+            self.rectangle((816, top - 16 - 22 * len(rows), 1072, top), color, False)
+            for i, line in enumerate(rows):
+                self.label(827, top - 19 - i * 22, line, 14, color if line == status else self.text)
+
+    def draw_passive_notice(self) -> None:
+        if self.game is not self._notice_battle:
+            self._notice_battle = self.game
+            self._notice_index, self._notice_until = -1, 0.0
+        now = monotonic()
+        messages = self.game.passive_messages
+        if now >= self._notice_until and self._notice_index + 1 < len(messages):
+            self._notice_index += 1
+            self._notice_until = now + 2.2
+        if now < self._notice_until:
+            self.rectangle((246, 686, 810, 717), (50, 38, 66))
+            self.label(260, 701, f"패시브  {messages[self._notice_index]}", 16, (236, 202, 255))
+
+    @staticmethod
+    def revival_card_bounds(slot: int) -> tuple[int, int, int, int]:
+        left = 276 + slot * 132
+        return left, 329, left + 120, 469
+
+    def draw_revival_choices(self) -> None:
+        piece = self.game.revival_pending
+        bounds = (254, 306, 812, 516)
+        self.rectangle(bounds, (29, 24, 46))
+        self.rectangle(bounds, self.accent, False)
+        self.label(276, 492, f"{piece.identifier} {piece.name} 부활 · 사용할 카드를 고르세요.", 18)
+        for slot, suit in enumerate(Suit):
+            left, bottom, right, top = self.revival_card_bounds(slot)
+            card_bounds = (left, bottom, right, top)
+            self.rectangle(card_bounds, (49, 39, 66))
+            self.rectangle(card_bounds, self.muted, False)
+            self.card_faces[suit].draw((left + right) // 2, 411, 66, 92)
+            self.label(left + 14, 347, f"{suit.label} A", 14, self.accent)
 
     def draw_footer(self, revealing: bool = False) -> None:
         color = self.red if self.game.failed and not revealing else self.text

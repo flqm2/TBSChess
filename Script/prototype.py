@@ -10,6 +10,7 @@ from random import choice
 from board import Board
 from cards import CARD_SKILLS, MAGIC_BOX, REDRAW, TARGETED_EFFECTS, CardDraw, MagicBox, Suit
 from movement import MovementRules
+from passives import DamageResult, apply_damage, mage_bonus, protected_pieces
 from piece import Piece, Team
 from skills import Cell, Effect, SKILLS, Skill
 from turn_manager import TurnManager
@@ -52,6 +53,9 @@ class Prototype:
         self.redraw_pending = False
         self.card_target_pending = False
         self.boxes: list[MagicBox] = []
+        self.passive_messages: list[str] = []
+        self._revival_choices: deque[Piece] = deque()
+        self._revival_cards: dict[str, Suit] = {}
         self._draw_turn_card()
 
     @property
@@ -83,9 +87,33 @@ class Prototype:
             return ()
         return self.skills[self.selected_skill].cells(self.board, self.current)
 
+    @property
+    def mage_preview(self) -> tuple[tuple[Cell, int], ...]:
+        if self.current.character_id != "mage":
+            return ()
+        cells = self.skill_preview
+        return tuple((piece.position, mage_bonus(self.current, piece.position))
+                     for piece in self.board.living_pieces
+                     if piece.team is not self.current.team and piece.position in cells)
+
+    @property
+    def revival_pending(self) -> Piece | None:
+        return self._revival_choices[0] if self._revival_choices else None
+
+    def choose_revival_card(self, suit: Suit) -> None:
+        if not self._revival_choices:
+            return
+        piece = self._revival_choices.popleft()
+        if piece is self.current:
+            self.card_draw = CardDraw(suit)
+        else:
+            self._revival_cards[piece.identifier] = suit
+
     def skill_unavailable(self, slot: int) -> str | None:
         if self.winner is not None:
             return "경기 종료"
+        if self.revival_pending is not None:
+            return "부활 카드 선택 중"
         if self.redraw_pending and not (slot == 0 and self.card_target_pending):
             return "새 카드 발동 중"
         if slot == 2:
@@ -97,7 +125,7 @@ class Prototype:
         return None
 
     def open_movement(self) -> None:
-        if self.winner is not None or self.redraw_pending:
+        if self.winner is not None or self.redraw_pending or self.revival_pending is not None:
             return
         if not self.legal_moves:
             self.message, self.failed = "이동할 수 있는 칸이 없습니다.", True
@@ -108,7 +136,8 @@ class Prototype:
         self.message, self.failed = "보드에서 초록색 칸을 클릭하세요.", False
 
     def open_attack(self) -> None:
-        if self.winner is not None or self.action_mode is ActionMode.ATTACK:
+        if (self.winner is not None or self.revival_pending is not None
+                or self.action_mode is ActionMode.ATTACK):
             return
         if self.redraw_pending and not self.card_target_pending:
             return
@@ -170,11 +199,12 @@ class Prototype:
         return True
 
     def _draw_turn_card(self) -> None:
-        if self.current.character_id == "cardmaster":
-            self.card_draw = CardDraw(choice(tuple(Suit)))
-            self.message = f"{self.current.identifier} 카드술사 · {self.card_draw.suit.label} A를 뽑았습니다."
-        else:
-            self.card_draw = None
+        self.card_draw = None
+        if self.current.character_id != "cardmaster" or self.current in self._revival_choices:
+            return
+        suit = self._revival_cards.pop(self.current.identifier, None)
+        self.card_draw = CardDraw(suit if suit is not None else choice(tuple(Suit)))
+        self.message = f"{self.current.identifier} 카드술사 · {self.card_draw.suit.label} A"
 
     def _request_card_target(self) -> None:
         self.card_target_pending = True
@@ -247,6 +277,7 @@ class Prototype:
         hits = []
         forward = 1 if caster.team is Team.BLUE else -1
         targets = tuple(self.board.piece_at(cell) for cell in cells)
+        protected = protected_pieces(self.board)
         for target in targets:
             if skill.effect is Effect.HEAL_ALLIES:
                 if target is not None and target.team is caster.team and target is not caster:
@@ -254,19 +285,19 @@ class Prototype:
                 continue
             if target is None or (target.team is caster.team and not random_target):
                 continue
-            damage = min(target.current_hp, skill.damage)
-            target.current_hp -= damage
-            if skill.effect in (Effect.MARK, Effect.RANDOM_MARK):
-                marks = target.marks.get(caster.identifier, 0)
-                target.marks[caster.identifier] = marks + 1 + int(caster.empowered_mark)
+            marks = 1 + int(caster.empowered_mark) if skill.effect in (Effect.MARK, Effect.RANDOM_MARK) else 0
+            result = self._hit(caster, target, skill.damage, protected, marks)
+            if result.blocked:
+                continue
+            if marks:
                 caster.empowered_mark = False
-            if target.current_hp > 0:
+            if target.current_hp > 0 and not result.revived:
                 if skill.effect is Effect.STUN and target not in self.turns.acted:
                     target.stunned_round = self.turns.round
                 elif skill.effect is Effect.PULL:
                     x, y = target.position
                     self._shift_piece(target, (x - forward, y))
-            hits.append(Hit(target.identifier, target.position, damage))
+            hits.append(Hit(target.identifier, target.position, result.damage))
         if skill.effect is Effect.RETREAT:
             x, y = caster.position
             self._shift_piece(caster, (x - forward, y))
@@ -280,9 +311,16 @@ class Prototype:
         target = self.board.piece_at(box.cell)
         if target is None or target.team is box.owner.team:
             return None
-        damage = min(target.current_hp, box.damage)
-        target.current_hp -= damage
-        return Hit(target.identifier, box.cell, damage)
+        result = self._hit(box.owner, target, box.damage, protected_pieces(self.board))
+        return None if result.blocked else Hit(target.identifier, box.cell, result.damage)
+
+    def _hit(self, caster: Piece, target: Piece, damage: int, protected: set[str], marks: int = 0) -> DamageResult:
+        result = apply_damage(self.board, caster, target, damage, protected, marks)
+        if result.notice:
+            self.passive_messages.append(result.notice)
+        if result.revived:
+            self._revival_choices.append(target)
+        return result
 
     def _advance_boxes(self) -> SkillCast | None:
         remaining = []
@@ -363,7 +401,7 @@ class Prototype:
         return heroes
 
     def try_move(self, destination: tuple[int, int] | None) -> bool:
-        if self.winner is not None or self.redraw_pending:
+        if self.winner is not None or self.redraw_pending or self.revival_pending is not None:
             return False
         piece = self.current
         reason = self.movement.rejection(piece, destination)
@@ -377,7 +415,7 @@ class Prototype:
         return True
 
     def skip_turn(self) -> None:
-        if self.winner is None and not self.redraw_pending:
+        if self.winner is None and not self.redraw_pending and self.revival_pending is None:
             self._finish_action("턴 넘김")
 
     @staticmethod

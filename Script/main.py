@@ -24,7 +24,7 @@ def handle_event(event, game: GameController, view: GameView) -> bool:
         elif event.key == pico2d.SDLK_RETURN and game.stage is not Stage.MOVEMENT:
             game.confirm()
     elif event.type == pico2d.SDL_MOUSEMOTION:
-        view.hover = view.cell_at_pixel(event.x, event.y)
+        view.point_at(event.x, event.y)
     elif event.type == pico2d.SDL_MOUSEBUTTONDOWN and event.button == pico2d.SDL_BUTTON_LEFT:
         view.click(event.x, event.y)
     return True

@@ -1,6 +1,7 @@
 """선택·배치 화면과 입력 영역. 실제 선택/배치 유효성은 컨트롤러가 판정한다."""
 
 from battle_view import BattleView
+from cards import Suit
 from character_data import CHARACTERS
 from game_controller import GameController, Stage
 from piece import Team
@@ -35,6 +36,12 @@ class GameView(BattleView):
         controller = self.controller
         if controller.stage is Stage.MOVEMENT:
             battle = controller.battle
+            if battle.revival_pending is not None:
+                for slot, suit in enumerate(Suit):
+                    if self.hit(self.revival_card_bounds(slot), x, screen_y):
+                        battle.choose_revival_card(suit)
+                        break
+                return
             if battle.winner is not None or self.card_revealing(battle):
                 return
             if self.action_panel_progress(battle) < 1:

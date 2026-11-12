@@ -41,6 +41,8 @@ class Piece:
     stunned_round: int = field(default=0, init=False)
     marks: dict[str, int] = field(default_factory=dict, init=False)
     empowered_mark: bool = field(default=False, init=False)
+    passive_used: bool = field(default=False, init=False)
+    shield: bool = field(default=False, init=False)
 
     def __post_init__(self) -> None:
         if self.max_hp <= 0:
