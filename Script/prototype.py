@@ -10,6 +10,7 @@ from random import choice
 from board import Board
 from cards import CARD_SKILLS, MAGIC_BOX, REDRAW, TARGETED_EFFECTS, CardDraw, MagicBox, Suit
 from final_battle import FinalBattleRules
+from initiative import InitiativeRoll, roll_initiative
 from movement import MovementRules
 from passives import DamageResult, apply_damage, mage_bonus, protected_pieces
 from piece import Piece, Team
@@ -39,11 +40,6 @@ class Prototype:
     def __init__(self, pieces: Iterable[Piece]):
         self.board = Board(pieces)
         self.movement = MovementRules(self.board)
-        blue = [piece for piece in self.board.pieces if piece.team is Team.BLUE]
-        red = [piece for piece in self.board.pieces if piece.team is Team.RED]
-        order = (piece for pair in zip_longest(blue, red) for piece in pair if piece is not None)
-        self.turns = TurnManager(order)
-        self.message = f"{self.current.identifier} {self.current.name} 차례. 공격 또는 이동을 선택하세요."
         self.failed = False
         self.history: deque[str] = deque(maxlen=4)
         self.action_mode: ActionMode | None = None
@@ -52,6 +48,7 @@ class Prototype:
         self.winner: Team | None = None
         self.drawn = False
         self.final_battle: FinalBattleRules | None = None
+        self.opening_initiative: InitiativeRoll | None = None
         self.card_draw: CardDraw | None = None
         self.redraw_pending = False
         self.card_target_pending = False
@@ -64,7 +61,22 @@ class Prototype:
             self._update_survivors()
             self.turns = TurnManager(self._start_final_round([]))
             self.message = f"최종전 시작. {self.current.identifier} {self.current.name} 차례."
+        else:
+            blue = [piece for piece in self.board.pieces if piece.team is Team.BLUE]
+            red = [piece for piece in self.board.pieces if piece.team is Team.RED]
+            if blue and red:
+                self.opening_initiative = roll_initiative()
+            first, second = blue, red
+            if self.opening_initiative and self.opening_initiative.first_team is Team.RED:
+                first, second = red, blue
+            order = (piece for pair in zip_longest(first, second) for piece in pair if piece is not None)
+            self.turns = TurnManager(order)
+            self.message = f"{self.current.identifier} {self.current.name} 차례. 공격 또는 이동을 선택하세요."
         self._draw_turn_card()
+
+    @property
+    def initiative(self) -> InitiativeRoll | None:
+        return self.final_battle.initiative if self.final_battle is not None else self.opening_initiative
 
     @property
     def is_over(self) -> bool:

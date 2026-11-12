@@ -6,10 +6,11 @@ from math import cos, pi, sin, tau
 from pathlib import Path
 from time import monotonic
 
-import pico2d
+from pico2d import pico2d
 
 from character_data import CHARACTERS
 from cards import Suit
+from dice_view import DiceView
 from passives import DESCRIPTIONS, aura_cells
 from piece import Job, Piece, Team
 from portraits import load_grayscale_portrait
@@ -53,6 +54,7 @@ class BattleView:
         card_dir = self.resource_dir / "Cards"
         self.card_faces = {suit: pico2d.load_image(str(card_dir / f"ace_{suit.slug}.png")) for suit in Suit}
         self.card_back = pico2d.load_image(str(card_dir / "back.png"))
+        self.dice_view = DiceView(self.resource_dir / "die_face.png")
         self.help_button = (self.width - 91, 22, self.width - 29, 80)
         self.hover: tuple[int, int] | None = None
         self.passive_hovered = False
@@ -82,6 +84,10 @@ class BattleView:
             self._draw_started = monotonic()
         return self._shown_draw is not None and monotonic() - self._draw_started < self.card_reveal_seconds
 
+    def initiative_revealing(self, battle: Prototype) -> bool:
+        final = battle.final_battle
+        return self.dice_view.showing(battle.initiative, delay=0.8 if final and final.sudden_death else 0.0)
+
     @classmethod
     def cell_at_pixel(cls, x: int, screen_y: int) -> tuple[int, int] | None:
         """SDL 왼쪽 위 원점 입력을 보드 왼쪽 위 원점 좌표로 바꾼다."""
@@ -100,6 +106,13 @@ class BattleView:
     @staticmethod
     def rectangle(bounds, color, filled=True):
         pico2d.draw_rectangle(*bounds, *color, filled=filled)
+
+    def dim(self) -> None:
+        blend = c_int()
+        pico2d.SDL_GetRenderDrawBlendMode(pico2d.renderer, byref(blend))
+        pico2d.SDL_SetRenderDrawBlendMode(pico2d.renderer, pico2d.SDL_BLENDMODE_BLEND)
+        pico2d.draw_rectangle(0, 0, self.width - 1, self.height - 1, 8, 12, 20, 172, filled=True)
+        pico2d.SDL_SetRenderDrawBlendMode(pico2d.renderer, blend.value)
 
     def label(self, x, y, text, size=16, color=None):
         self.fonts[size].draw(x, y, text, color or self.text)
@@ -134,23 +147,26 @@ class BattleView:
             self.rectangle((x, y, x + filled - 1, top), self.team_color(piece.team))
 
     def draw(self) -> None:
-        revealing = self.card_revealing(self.game)
+        announcing = self.initiative_revealing(self.game)
+        revealing = not announcing and self.card_revealing(self.game)
         self.rectangle((0, 0, self.width - 1, self.height - 1), self.background)
-        self.draw_health_and_round()
+        self.draw_health_and_round(show_initiative=not announcing)
         self.draw_turn_order()
         self.draw_board()
         self.draw_details()
-        self.draw_actions(revealing)
+        self.draw_actions(announcing or revealing)
         self.draw_footer(revealing)
         self.draw_combat_notice()
         self.draw_passive_icon(self.game.current)
         self.draw_action_button(self.help_button, "?", self.blue, 26)
-        if self.game.revival_pending is not None:
+        if announcing:
+            self.dice_view.draw_announcement(self)
+        elif self.game.revival_pending is not None:
             self.draw_revival_choices()
         elif revealing:
             self.draw_card_reveal()
 
-    def draw_health_and_round(self) -> None:
+    def draw_health_and_round(self, show_initiative: bool) -> None:
         center = self.width // 2
         final = self.game.final_battle
         if final is None:
@@ -160,11 +176,14 @@ class BattleView:
             title = "최종전 · 서든데스" if final.sudden_death else "최종전 · 경계 해제"
             self.centered_label(center, 1010, title, 22, self.accent)
             self.centered_label(center, 954, f"{final.round:02}", 46, self.accent)
-            if final.dice:
-                blue, red = final.dice
-                first = "청팀" if blue > red else "홍팀"
-                self.centered_label(center, 907, f"주사위  청팀 {blue} · 홍팀 {red}  /  {first} 선공",
-                                    18, self.muted)
+        initiative = self.game.initiative
+        if initiative is not None and show_initiative:
+            blue, red = initiative.values
+            for offset, team, value in ((-125, Team.BLUE, blue), (125, Team.RED, red)):
+                self.dice_view.draw_face(center + offset, 962, 48, value)
+                self.centered_label(center + offset, 925, team.value, 14, self.team_color(team))
+            first = initiative.first_team
+            self.centered_label(center, 905, f"{first.value} 선공", 16, self.team_color(first))
         team_left = {Team.BLUE: self.board_x, Team.RED: self.width - self.board_x - 480}
         team_slots = {team: 0 for team in Team}
         for piece in self.game.board.pieces:

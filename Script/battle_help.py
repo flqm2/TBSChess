@@ -1,9 +1,5 @@
 """게임 화면 위에 기물별 기본 공격 범위를 보여주는 도움말 패널."""
 
-from ctypes import byref, c_int
-
-from pico2d import pico2d
-
 from board import Board
 from cards import CARD_SKILLS, Suit
 from piece import Piece, Team
@@ -52,11 +48,7 @@ class BattleHelp:
             self.selected = max(0, min(len(self.pieces) - 1, self.selected + step))
 
     def draw(self, view) -> None:
-        blend = c_int()
-        pico2d.SDL_GetRenderDrawBlendMode(pico2d.renderer, byref(blend))
-        pico2d.SDL_SetRenderDrawBlendMode(pico2d.renderer, pico2d.SDL_BLENDMODE_BLEND)
-        pico2d.draw_rectangle(0, 0, view.width - 1, view.height - 1, 8, 12, 20, 172, filled=True)
-        pico2d.SDL_SetRenderDrawBlendMode(pico2d.renderer, blend.value)
+        view.dim()
 
         x, y = self.x, self.y
         right, top = x + self.width, y + self.height

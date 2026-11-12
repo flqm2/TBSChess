@@ -48,6 +48,7 @@ def handle_event(event, game: GameController, view: GameView) -> bool:
         if event.key == pico2d.SDLK_ESCAPE:
             return False
         if (event.key == pico2d.SDLK_SPACE and game.stage is Stage.MOVEMENT
+                and not view.initiative_revealing(game.battle)
                 and not view.card_revealing(game.battle)):
             game.battle.skip_turn()
         elif event.key == pico2d.SDLK_RETURN and game.stage is not Stage.MOVEMENT:
@@ -85,6 +86,7 @@ def main(game: GameController | None = None) -> None:
             view.grayscale_portraits.clear()
             view.card_faces.clear()
             view.card_back = None
+            view.dice_view.image = None
         pico2d.close_canvas()
 
 

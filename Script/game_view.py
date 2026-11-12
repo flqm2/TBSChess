@@ -40,13 +40,15 @@ class GameView(BattleView):
             return
         if self.controller.stage is Stage.MOVEMENT:
             battle = self.controller.battle
-            if not self.card_revealing(battle):
+            if not self.initiative_revealing(battle) and not self.card_revealing(battle):
                 battle.resolve_redraw()
 
     def click(self, x, screen_y) -> None:
         controller = self.controller
         if controller.stage is Stage.MOVEMENT:
             battle = controller.battle
+            if self.initiative_revealing(battle):
+                return
             if self.help_overlay is not None:
                 if self.hit(self.help_overlay.close_button, x, screen_y):
                     self.help_overlay = None

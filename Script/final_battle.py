@@ -1,7 +1,6 @@
 """양측 최후 생존 기물의 라운드 규칙."""
 
-from random import randint
-
+from initiative import InitiativeRoll, roll_initiative
 from piece import Piece, Team
 
 
@@ -9,7 +8,7 @@ class FinalBattleRules:
     def __init__(self, blue: Piece, red: Piece):
         self.pieces = (blue, red)
         self.round = 0
-        self.dice: tuple[int, int] | None = None
+        self.initiative: InitiativeRoll | None = None
         self.winner: Team | None = None
         self.drawn = False
         self._stun_round: dict[str, int] = {}
@@ -20,7 +19,7 @@ class FinalBattleRules:
 
     def start_round(self) -> tuple[tuple[Piece, ...], tuple[tuple[Piece, int], ...]]:
         self.round += 1
-        self.dice = None
+        self.initiative = None
         damage = ()
         if self.sudden_death:
             previous_hp = tuple(piece.current_hp for piece in self.pieces)
@@ -40,11 +39,9 @@ class FinalBattleRules:
             if self.winner is not None or self.drawn:
                 return (), damage
 
-        blue, red = randint(1, 6), randint(1, 6)
-        while blue == red:
-            blue, red = randint(1, 6), randint(1, 6)
-        self.dice = blue, red
-        return (self.pieces if blue > red else self.pieces[::-1]), damage
+        self.initiative = roll_initiative()
+        order = self.pieces if self.initiative.first_team is Team.BLUE else self.pieces[::-1]
+        return order, damage
 
     def apply_stun(self, piece: Piece) -> bool:
         previous = self._stun_round.get(piece.identifier)
