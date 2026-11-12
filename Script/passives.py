@@ -77,7 +77,6 @@ def apply_damage(board: Board, caster: Piece, target: Piece, base_damage: int,
         if target.character_id == "cardmaster" and not target.passive_used:
             target.passive_used = True
             target.current_hp = max(1, target.max_hp // 5)
-            target.stunned_round = 0
             return DamageResult(lost, f"{name} · 부활, 체력 {target.current_hp} 회복", revived=True)
         if executed:
             return DamageResult(lost, f"{name} · 표식 3개로 처치")

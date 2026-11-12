@@ -38,7 +38,7 @@ class Piece:
     current_hp: int = field(init=False)
     hero: bool = field(default=False, init=False)
     hero_skill_round: int | None = field(default=None, init=False)
-    stunned_round: int = field(default=0, init=False)
+    stunned: bool = field(default=False, init=False)
     marks: dict[str, int] = field(default_factory=dict, init=False)
     empowered_mark: bool = field(default=False, init=False)
     passive_used: bool = field(default=False, init=False)

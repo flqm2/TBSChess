@@ -25,6 +25,7 @@ class BattleView:
     menu_card = (488, 149, 42, 59)
     pass_button = (840, 244, 1072, 288)
     passive_icon = (1002, 569, 1072, 596)
+    help_button = (1030, 721, 1072, 752)
     background = (19, 25, 34)
     text = (233, 237, 241)
     muted = (151, 166, 183)
@@ -116,13 +117,14 @@ class BattleView:
         self.label(40, 735, "전략 RPG 체스", 30)
         self.label(40, 700, "이동 · 스킬", 16, self.muted)
         self.label(884, 735, f"ROUND {self.game.turns.round:02}", 22, self.accent)
+        self.draw_action_button(self.help_button, "?", self.blue, 18)
         self.label(884, 704, f"양측 수동 조작 / {len(self.game.board.pieces)}기", 14, self.muted)
         self.draw_turn_order()
         self.draw_board()
         self.draw_details()
         self.draw_actions(revealing)
         self.draw_footer(revealing)
-        self.draw_passive_notice()
+        self.draw_combat_notice()
         if self.game.revival_pending is not None:
             self.draw_revival_choices()
         elif revealing:
@@ -137,7 +139,7 @@ class BattleView:
             self.rectangle((x, 635, x + 3, 680), self.team_color(piece.team))
             if piece.current_hp == 0:
                 status = "처치됨"
-            elif piece.stunned_round == self.game.turns.round:
+            elif piece.stunned:
                 status = "기절"
             elif active:
                 status = "현재 차례"
@@ -234,6 +236,8 @@ class BattleView:
             if battle is not None and piece.marks:
                 self.rectangle((x + 9, y + 17, x + 43, y + 35), (66, 38, 88))
                 self.label(x + 13, y + 26, f"◆ {sum(piece.marks.values())}", 14, (238, 192, 255))
+            if battle is not None and piece.stunned:
+                self.label(x - 39, y + 27, "기절", 14, self.accent)
         if battle is not None:
             for cell, percent in battle.mage_preview:
                 x, y = self.cell_center(cell)
@@ -411,18 +415,19 @@ class BattleView:
             for i, line in enumerate(rows):
                 self.label(827, top - 19 - i * 22, line, 14, color if line == status else self.text)
 
-    def draw_passive_notice(self) -> None:
+    def draw_combat_notice(self) -> None:
         if self.game is not self._notice_battle:
             self._notice_battle = self.game
             self._notice_index, self._notice_until = -1, 0.0
         now = monotonic()
-        messages = self.game.passive_messages
+        messages = self.game.combat_notices
         if now >= self._notice_until and self._notice_index + 1 < len(messages):
             self._notice_index += 1
             self._notice_until = now + 2.2
         if now < self._notice_until:
             self.rectangle((246, 686, 810, 717), (50, 38, 66))
-            self.label(260, 701, f"패시브  {messages[self._notice_index]}", 16, (236, 202, 255))
+            kind, text = messages[self._notice_index]
+            self.label(260, 701, f"{kind}  {text}", 16, (236, 202, 255))
 
     @staticmethod
     def revival_card_bounds(slot: int) -> tuple[int, int, int, int]:

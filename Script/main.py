@@ -15,6 +15,10 @@ def handle_event(event, game: GameController, view: GameView) -> bool:
     """종료 요청이면 False를 반환한다."""
     if event.type == pico2d.SDL_QUIT:
         return False
+    if view.help_window is not None:
+        if event.type == pico2d.SDL_KEYDOWN and event.key == pico2d.SDLK_ESCAPE:
+            view.close_help()
+        return True
     if event.type == pico2d.SDL_KEYDOWN:
         if event.key == pico2d.SDLK_ESCAPE:
             return False
@@ -49,6 +53,7 @@ def main() -> None:
                 pico2d.delay(0.01)
     finally:
         if view is not None:
+            view.close_help()
             # SDL 렌더러가 살아 있을 때 원본 이미지의 텍스처부터 해제한다.
             view.images.clear()
             view.card_faces.clear()

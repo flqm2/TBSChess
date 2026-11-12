@@ -12,7 +12,7 @@ Cell = tuple[int, int]
 class Effect(Enum):
     DAMAGE = "범위 내 적 타격"
     PULL = "적을 가로 1칸 끌기"
-    STUN = "적의 이번 라운드 차례 제거"
+    STUN = "적의 다음 차례를 건너뜀"
     RETREAT = "사용 후 뒤로 1칸"
     MARK = "표식 1개"
     RANDOM_MARK = "정면 무작위 · 표식 +1 · 아군 포함"

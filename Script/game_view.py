@@ -1,6 +1,7 @@
 """선택·배치 화면과 입력 영역. 실제 선택/배치 유효성은 컨트롤러가 판정한다."""
 
 from battle_view import BattleView
+from battle_help import BattleHelp
 from cards import Suit
 from character_data import CHARACTERS
 from game_controller import GameController, Stage
@@ -14,6 +15,12 @@ class GameView(BattleView):
     def __init__(self, controller: GameController):
         super().__init__()
         self.controller = controller
+        self.help_window: BattleHelp | None = None
+
+    def close_help(self) -> None:
+        if self.help_window is not None:
+            self.help_window.close()
+            self.help_window = None
 
     @staticmethod
     def character_bounds(index):
@@ -27,6 +34,11 @@ class GameView(BattleView):
         return left <= x <= right and bottom <= cls.height - 1 - screen_y <= top
 
     def update(self) -> None:
+        if self.help_window is not None:
+            self.help_window.update()
+            if not self.help_window.is_open:
+                self.close_help()
+            return
         if self.controller.stage is Stage.MOVEMENT:
             battle = self.controller.battle
             if not self.card_revealing(battle):
@@ -36,6 +48,11 @@ class GameView(BattleView):
         controller = self.controller
         if controller.stage is Stage.MOVEMENT:
             battle = controller.battle
+            if self.help_window is not None:
+                return
+            if self.hit(self.help_button, x, screen_y):
+                self.help_window = BattleHelp(battle.board, battle.current)
+                return
             if battle.revival_pending is not None:
                 for slot, suit in enumerate(Suit):
                     if self.hit(self.revival_card_bounds(slot), x, screen_y):

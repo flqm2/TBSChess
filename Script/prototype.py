@@ -53,7 +53,7 @@ class Prototype:
         self.redraw_pending = False
         self.card_target_pending = False
         self.boxes: list[MagicBox] = []
-        self.passive_messages: list[str] = []
+        self.combat_notices: list[tuple[str, str]] = []
         self._revival_choices: deque[Piece] = deque()
         self._revival_cards: dict[str, Suit] = {}
         self._draw_turn_card()
@@ -292,8 +292,8 @@ class Prototype:
             if marks:
                 caster.empowered_mark = False
             if target.current_hp > 0 and not result.revived:
-                if skill.effect is Effect.STUN and target not in self.turns.acted:
-                    target.stunned_round = self.turns.round
+                if skill.effect is Effect.STUN:
+                    target.stunned = True
                 elif skill.effect is Effect.PULL:
                     x, y = target.position
                     self._shift_piece(target, (x - forward, y))
@@ -317,7 +317,7 @@ class Prototype:
     def _hit(self, caster: Piece, target: Piece, damage: int, protected: set[str], marks: int = 0) -> DamageResult:
         result = apply_damage(self.board, caster, target, damage, protected, marks)
         if result.notice:
-            self.passive_messages.append(result.notice)
+            self.combat_notices.append(("패시브", result.notice))
         if result.revived:
             self._revival_choices.append(target)
         return result
@@ -361,7 +361,8 @@ class Prototype:
         heroes = self._update_survivors()
         casts = [cast] if cast is not None else []
         while self.winner is None:
-            self.turns.advance()
+            for skipped in self.turns.advance():
+                self.combat_notices.append(("기절", f"{skipped.identifier} {skipped.name} · 차례를 건너뜁니다."))
             box_cast = self._advance_boxes()
             if box_cast is not None:
                 casts.append(box_cast)

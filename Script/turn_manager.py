@@ -21,14 +21,21 @@ class TurnManager:
     def acted(self) -> tuple[Piece, ...]:
         return self.order[:self.index]
 
-    def advance(self) -> None:
+    def advance(self) -> tuple[Piece, ...]:
         if not any(piece.current_hp > 0 for piece in self.order):
-            return
+            return ()
+        skipped = []
         while True:
             self.index += 1
             if self.index == len(self.order):
                 self.index = 0
                 self.round += 1
-            if self.current.current_hp > 0 and self.current.stunned_round != self.round:
-                return
+            piece = self.current
+            if piece.current_hp == 0:
+                continue
+            if piece.stunned:
+                piece.stunned = False
+                skipped.append(piece)
+            else:
+                return tuple(skipped)
 
