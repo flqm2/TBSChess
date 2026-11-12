@@ -32,9 +32,17 @@ def handle_event(event, game: GameController, view: GameView) -> bool:
     """종료 요청이면 False를 반환한다."""
     if event.type == pico2d.SDL_QUIT:
         return False
-    if view.help_window is not None:
-        if event.type == pico2d.SDL_KEYDOWN and event.key == pico2d.SDLK_ESCAPE:
-            view.close_help()
+    if event.type == pico2d.SDL_MOUSEBUTTONDOWN and event.button == pico2d.SDL_BUTTON_LEFT:
+        view.click(event.x, event.y)
+        return True
+    if view.help_overlay is not None:
+        if event.type == pico2d.SDL_KEYDOWN:
+            if event.key == pico2d.SDLK_ESCAPE:
+                view.help_overlay = None
+            elif event.key == pico2d.SDLK_UP:
+                view.help_overlay.move_selection(-1)
+            elif event.key == pico2d.SDLK_DOWN:
+                view.help_overlay.move_selection(1)
         return True
     if event.type == pico2d.SDL_KEYDOWN:
         if event.key == pico2d.SDLK_ESCAPE:
@@ -46,8 +54,6 @@ def handle_event(event, game: GameController, view: GameView) -> bool:
             game.confirm()
     elif event.type == pico2d.SDL_MOUSEMOTION:
         view.point_at(event.x, event.y)
-    elif event.type == pico2d.SDL_MOUSEBUTTONDOWN and event.button == pico2d.SDL_BUTTON_LEFT:
-        view.click(event.x, event.y)
     return True
 
 
@@ -73,7 +79,6 @@ def main() -> None:
                 pico2d.delay(0.01)
     finally:
         if view is not None:
-            view.close_help()
             # SDL 렌더러가 살아 있을 때 원본 이미지의 텍스처부터 해제한다.
             view.images.clear()
             view.grayscale_portraits.clear()

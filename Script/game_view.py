@@ -17,12 +17,7 @@ class GameView(BattleView):
     def __init__(self, controller: GameController):
         super().__init__()
         self.controller = controller
-        self.help_window: BattleHelp | None = None
-
-    def close_help(self) -> None:
-        if self.help_window is not None:
-            self.help_window.close()
-            self.help_window = None
+        self.help_overlay: BattleHelp | None = None
 
     @staticmethod
     def character_bounds(index):
@@ -41,10 +36,7 @@ class GameView(BattleView):
         return left <= x <= right and bottom <= cls.height - 1 - screen_y <= top
 
     def update(self) -> None:
-        if self.help_window is not None:
-            self.help_window.update()
-            if not self.help_window.is_open:
-                self.close_help()
+        if self.help_overlay is not None:
             return
         if self.controller.stage is Stage.MOVEMENT:
             battle = self.controller.battle
@@ -55,10 +47,16 @@ class GameView(BattleView):
         controller = self.controller
         if controller.stage is Stage.MOVEMENT:
             battle = controller.battle
-            if self.help_window is not None:
+            if self.help_overlay is not None:
+                if self.hit(self.help_overlay.close_button, x, screen_y):
+                    self.help_overlay = None
+                else:
+                    self.help_overlay.select_at(x, self.height - 1 - screen_y)
                 return
             if self.hit(self.help_button, x, screen_y):
-                self.help_window = BattleHelp(battle.board, battle.current)
+                self.help_overlay = BattleHelp(battle.board, battle.current, self.width, self.height)
+                self.hover = None
+                self.passive_hovered = False
                 return
             if battle.revival_pending is not None:
                 for slot, suit in enumerate(Suit):
@@ -125,6 +123,8 @@ class GameView(BattleView):
         if self.controller.stage is Stage.MOVEMENT:
             self.game = self.controller.battle
             super().draw()
+            if self.help_overlay is not None:
+                self.help_overlay.draw(self)
             return
         self.rectangle((0, 0, self.width - 1, self.height - 1), self.background)
         self.label(94, 1020, "전략 RPG 체스", 32)

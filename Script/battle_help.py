@@ -1,8 +1,8 @@
-"""현재 기물별 기본 공격 범위를 보여주는 독립 도움말 창."""
+"""게임 화면 위에 기물별 기본 공격 범위를 보여주는 도움말 패널."""
 
-import tkinter as tk
-from math import ceil
-from pathlib import Path
+from ctypes import byref, c_int
+
+from pico2d import pico2d
 
 from board import Board
 from cards import CARD_SKILLS, Suit
@@ -22,109 +22,109 @@ def attack_ranges(board: Board, piece: Piece) -> tuple[tuple[str, tuple[Cell, ..
 
 
 class BattleHelp:
-    width, height = 800, 512
-    grid_x, grid_y, cell = 230, 152, 66
-    background = "#131922"
-    text = "#e9edf1"
-    muted = "#aab7c7"
-    accent = "#f3d384"
-    attack = "#244f76"
-    overlap = "#2d709e"
+    width, height = 1056, 648
+    cell_size = 82
+    attack = (36, 79, 118)
+    overlap = (45, 112, 158)
+    border = (82, 97, 112)
 
-    def __init__(self, board: Board, current: Piece):
+    def __init__(self, board: Board, current: Piece, canvas_width: int, canvas_height: int):
         self.board = board
         self.pieces = board.living_pieces
-        self.window = tk.Tk(className="TBSChessHelp")
-        self.window.title("전략 RPG 체스 · 전투 도움말")
-        self.window.geometry(f"{self.width}x{self.height}")
-        self.window.resizable(False, False)
-        self.window.protocol("WM_DELETE_WINDOW", self.close)
-        self.window.bind("<Escape>", lambda _: self.close())
-        self.canvas = tk.Canvas(self.window, width=self.width, height=self.height,
-                                bg=self.background, highlightthickness=0)
-        self.canvas.pack()
-        self.roster = tk.Listbox(self.window, font=("맑은 고딕", 12), bd=0, highlightthickness=0,
-                                 bg="#202b39", fg=self.text, selectbackground="#244f76",
-                                 selectforeground=self.text, activestyle="none", exportselection=False)
-        self.roster.place(x=26, y=self.grid_y, width=168, height=self.cell * 4)
-        for piece in self.pieces:
-            self.roster.insert(tk.END, f"  {piece.identifier}  {piece.name}")
-        index = next((i for i, piece in enumerate(self.pieces) if piece is current), 0)
-        self.roster.selection_set(index)
-        self.roster.activate(index)
-        self.roster.bind("<<ListboxSelect>>", self.draw)
-        self.roster.focus_set()
-        self.portrait = None
-        self.draw()
-        self.window.update_idletasks()
+        self.selected = next((i for i, piece in enumerate(self.pieces) if piece is current), 0)
+        self.x = (canvas_width - self.width) // 2
+        self.y = (canvas_height - self.height) // 2
+        self.close_button = (self.x + 976, self.y + 584, self.x + 1030, self.y + 630)
 
-    @property
-    def is_open(self) -> bool:
-        return self.window is not None
+    def row_bounds(self, index):
+        top = self.y + 474 - index * 40
+        return self.x + 30, top - 36, self.x + 260, top
 
-    def close(self) -> None:
-        if self.window is not None:
-            window, self.window = self.window, None
-            window.destroy()
+    def select_at(self, x: int, y: int) -> None:
+        for index in range(len(self.pieces)):
+            left, bottom, right, top = self.row_bounds(index)
+            if left <= x <= right and bottom <= y <= top:
+                self.selected = index
+                return
 
-    def update(self) -> None:
-        if self.window is not None:
-            self.window.update()
+    def move_selection(self, step: int) -> None:
+        if self.pieces:
+            self.selected = max(0, min(len(self.pieces) - 1, self.selected + step))
 
-    def label(self, x, y, text, size=12, color=None):
-        self.canvas.create_text(x, y, text=text, fill=color or self.text, anchor="w",
-                                font=("맑은 고딕", size))
+    def draw(self, view) -> None:
+        blend = c_int()
+        pico2d.SDL_GetRenderDrawBlendMode(pico2d.renderer, byref(blend))
+        pico2d.SDL_SetRenderDrawBlendMode(pico2d.renderer, pico2d.SDL_BLENDMODE_BLEND)
+        pico2d.draw_rectangle(0, 0, view.width - 1, view.height - 1, 8, 12, 20, 172, filled=True)
+        pico2d.SDL_SetRenderDrawBlendMode(pico2d.renderer, blend.value)
 
-    def draw(self, _event=None) -> None:
-        selection = self.roster.curselection()
-        if not selection:
+        x, y = self.x, self.y
+        right, top = x + self.width, y + self.height
+        bounds = (x, y, right, top)
+        view.rectangle((x + 8, y - 8, right + 8, top - 8), (8, 12, 18))
+        view.rectangle(bounds, (24, 32, 44))
+        view.rectangle((x, top - 81, right, top), (36, 49, 65))
+        view.rectangle(bounds, self.border, False)
+        view.label(x + 30, top - 40, "전투 도움말", 32)
+        view.draw_action_button(self.close_button, "×", view.muted, 26)
+        view.label(x + 30, y + 540, "기물을 선택하면 현재 위치에서 닿는 기본 공격 범위를 합쳐 보여줍니다.",
+                   18, view.muted)
+        view.label(x + 30, y + 502, "기물", 18, view.muted)
+        if not self.pieces:
+            view.label(x + 30, y + 450, "표시할 기물이 없습니다.", 18)
             return
-        piece = self.pieces[selection[0]]
-        ranges = attack_ranges(self.board, piece)
-        self.canvas.delete("all")
-        self.label(26, 33, "전투 도움말", 22)
-        self.label(26, 69, "기물을 선택하면 현재 위치에서 닿는 기본 공격 범위를 합쳐 보여줍니다.", 12, self.muted)
-        facing = "오른쪽 →" if piece.team is Team.BLUE else "← 왼쪽"
-        x, y = piece.position
-        state = "  /  영웅화" if piece.hero else ""
-        self.label(self.grid_x, 103, f"{piece.identifier} {piece.name}  /  {chr(65 + x)}{y + 1}  /  정면 {facing}{state}", 14)
-        self.label(26, 127, "기물", 12, self.muted)
+        for index, piece in enumerate(self.pieces):
+            row = self.row_bounds(index)
+            selected = index == self.selected
+            team_color = view.team_color(piece.team)
+            view.rectangle(row, (36, 66, 91) if selected else (30, 41, 55))
+            view.rectangle((row[0], row[1], row[0] + 3, row[3]), team_color)
+            if selected:
+                view.rectangle(row, team_color, False)
+            view.label(row[0] + 15, (row[1] + row[3]) // 2, f"{piece.identifier}  {piece.name}", 18)
 
+        piece = self.pieces[self.selected]
+        grid_x = x + 322
+        facing = "오른쪽 →" if piece.team is Team.BLUE else "← 왼쪽"
+        column, row = piece.position
+        hero = "  /  영웅화" if piece.hero else ""
+        view.label(grid_x, y + 502,
+                   f"{piece.identifier} {piece.name}  /  {chr(65 + column)}{row + 1}  /  정면 {facing}{hero}", 20)
+        ranges = attack_ranges(self.board, piece)
+        self.draw_grid(view, piece, ranges)
+        for left, color, label in ((grid_x, self.attack, "공격 가능"),
+                                   (grid_x + 164, self.overlap, "공격 범위 겹침")):
+            view.rectangle((left, y + 86, left + 21, y + 104), color)
+            view.label(left + 30, y + 95, label, 16)
+        names = " · ".join(name for name, _ in ranges)
+        view.label(grid_x, y + 48, f"포함된 공격  {names}" if names else "표시할 기본 공격이 없습니다.",
+                   18, view.muted)
+
+    def draw_grid(self, view, piece: Piece, ranges) -> None:
+        x, top = self.x + 322, self.y + 447
+        size = self.cell_size
         for column in range(self.board.columns):
-            self.label(self.grid_x + column * self.cell + 28, 135, chr(65 + column), 11, self.muted)
+            view.centered_label(x + column * size + size // 2, top + 16, chr(65 + column), 16, view.muted)
         for row in range(self.board.rows):
-            self.label(209, self.grid_y + row * self.cell + 33, str(row + 1), 11, self.muted)
+            bottom = top - (row + 1) * size
+            view.centered_label(x - 20, bottom + size // 2, str(row + 1), 16, view.muted)
             for column in range(self.board.columns):
                 cell = column, row
-                left = self.grid_x + column * self.cell
-                top = self.grid_y + row * self.cell
+                left = x + column * size
+                bounds = (left, bottom, left + size, bottom + size)
                 count = sum(cell in cells for _, cells in ranges)
-                fill = "#1b2b3a" if column < 4 else "#33252e"
                 if count:
                     fill = self.overlap if count > 1 else self.attack
-                self.canvas.create_rectangle(left, top, left + self.cell, top + self.cell,
-                                             fill=fill, outline="#526170")
+                else:
+                    fill = (27, 43, 58) if self.board.in_territory(Team.BLUE, cell) else (51, 37, 46)
+                view.rectangle(bounds, fill)
+                view.rectangle(bounds, self.border, False)
                 occupant = self.board.piece_at(cell)
-                if occupant is not None and occupant is not piece:
-                    self.label(left + 7, top + 50, occupant.identifier, 11, self.muted)
-                if cell == piece.position:
-                    self.draw_caster(piece, left, top)
-
-        boundary = self.grid_x + 4 * self.cell
-        self.canvas.create_line(boundary, self.grid_y, boundary, self.grid_y + 4 * self.cell,
-                                fill=self.accent, width=2)
-        self.canvas.create_rectangle(230, 435, 248, 451, fill=self.attack, outline="")
-        self.label(255, 443, "공격 가능", 11)
-        self.canvas.create_rectangle(366, 435, 384, 451, fill=self.overlap, outline="")
-        self.label(391, 443, "공격 범위 겹침", 11)
-        names = " · ".join(name for name, _ in ranges)
-        self.label(230, 475, f"포함된 공격  {names}" if names else "표시할 기본 공격이 없습니다.", 12, self.muted)
-
-    def draw_caster(self, piece: Piece, left: int, top: int) -> None:
-        self.canvas.create_rectangle(left + 1, top + 1, left + 65, top + 65, outline=self.accent, width=2)
-        path = Path(__file__).resolve().parents[1] / "Resource" / piece.image_name
-        sprite = tk.PhotoImage(master=self.window, file=str(path))
-        scale = max(1, ceil(max(sprite.width(), sprite.height()) / 42))
-        self.portrait = sprite.subsample(scale, scale)
-        self.canvas.create_image(left + 33, top + 25, image=self.portrait)
-        self.label(left + 7, top + 51, piece.identifier, 11, self.accent)
+                if occupant is piece:
+                    view.rectangle((left + 2, bottom + 2, left + size - 2, bottom + size - 2), view.accent, False)
+                    view.portrait(piece, left + size // 2, bottom + 47, 54, 53)
+                    view.centered_label(left + size // 2, bottom + 14, piece.identifier, 14, view.accent)
+                elif occupant is not None:
+                    view.label(left + 8, bottom + 14, occupant.identifier, 14, view.team_color(occupant.team))
+        boundary = x + self.board.columns // 2 * size
+        view.rectangle((boundary, top - self.board.rows * size, boundary + 1, top), view.accent)
