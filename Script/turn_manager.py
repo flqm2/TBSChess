@@ -21,6 +21,10 @@ class TurnManager:
     def acted(self) -> tuple[Piece, ...]:
         return self.order[:self.index]
 
+    @property
+    def upcoming(self) -> tuple[Piece, ...]:
+        return self.order[self.index:] + self.acted
+
     def advance(self) -> tuple[Piece, ...]:
         if not any(piece.current_hp > 0 for piece in self.order):
             return ()

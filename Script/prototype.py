@@ -54,6 +54,7 @@ class Prototype:
         self.card_target_pending = False
         self.boxes: list[MagicBox] = []
         self.combat_notices: list[tuple[str, str]] = []
+        self.last_stun_skips: tuple[Piece, ...] = ()
         self._revival_choices: deque[Piece] = deque()
         self._revival_cards: dict[str, Suit] = {}
         self._draw_turn_card()
@@ -360,8 +361,10 @@ class Prototype:
         self.failed = False
         heroes = self._update_survivors()
         casts = [cast] if cast is not None else []
+        stun_skips = []
         while self.winner is None:
             for skipped in self.turns.advance():
+                stun_skips.append(skipped)
                 self.combat_notices.append(("기절", f"{skipped.identifier} {skipped.name} · 차례를 건너뜁니다."))
             box_cast = self._advance_boxes()
             if box_cast is not None:
@@ -370,6 +373,7 @@ class Prototype:
                     heroes.extend(self._update_survivors())
             if self.current.current_hp > 0:
                 break
+        self.last_stun_skips = tuple(stun_skips)
         if casts:
             self.last_cast = SkillCast(
                 tuple(dict.fromkeys(cell for result in casts for cell in result.cells)),
