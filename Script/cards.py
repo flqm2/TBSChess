@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from enum import Enum
 
-from piece import Job, Piece
+from piece import Job, Piece, Team
 from skills import Cell, Effect, Skill, pattern
 
 
@@ -29,6 +29,10 @@ class MagicBox:
     owner: Piece
     cell: Cell
     damage: int
+
+    def next_cell(self) -> Cell:
+        x, y = self.cell
+        return x + (1 if self.owner.team is Team.BLUE else -1), y
 
 
 THROW = "카드 던지기"

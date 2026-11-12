@@ -11,7 +11,7 @@ from piece import Team
 def make_game(sudden_death: bool = False) -> GameController:
     blue = CHARACTER_BY_ID["mage"].create_piece(Team.BLUE, 1, (3, 1))
     red = CHARACTER_BY_ID["assassin"].create_piece(Team.RED, 1, (5, 2))
-    game = GameController()
+    game = GameController(red_ai=False)
     game.start_battle((blue, red))
     if sudden_death:
         battle = game.battle

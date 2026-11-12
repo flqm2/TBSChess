@@ -43,9 +43,12 @@ class FinalBattleRules:
         order = self.pieces if self.initiative.first_team is Team.BLUE else self.pieces[::-1]
         return order, damage
 
-    def apply_stun(self, piece: Piece) -> bool:
+    def stun_immune(self, piece: Piece) -> bool:
         previous = self._stun_round.get(piece.identifier)
-        if previous is not None and self.round == previous + 1:
+        return previous is not None and self.round == previous + 1
+
+    def apply_stun(self, piece: Piece) -> bool:
+        if self.stun_immune(piece):
             return False
         if not piece.stunned:
             piece.stunned = True

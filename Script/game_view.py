@@ -1,5 +1,7 @@
 """선택·배치 화면과 입력 영역. 실제 선택/배치 유효성은 컨트롤러가 판정한다."""
 
+from time import monotonic
+
 from battle_view import BattleView
 from battle_help import BattleHelp
 from cards import Suit
@@ -35,13 +37,22 @@ class GameView(BattleView):
         left, bottom, right, top = bounds
         return left <= x <= right and bottom <= cls.height - 1 - screen_y <= top
 
+    @property
+    def ai_turn(self) -> bool:
+        ai, battle = self.controller.ai, self.controller.battle
+        return ai is not None and battle is not None and ai.owns_turn(battle)
+
     def update(self) -> None:
         if self.help_overlay is not None:
             return
         if self.controller.stage is Stage.MOVEMENT:
             battle = self.controller.battle
-            if not self.initiative_revealing(battle) and not self.card_revealing(battle):
+            if self.initiative_revealing(battle) or self.card_revealing(battle):
+                return
+            if battle.redraw_pending:
                 battle.resolve_redraw()
+            elif self.controller.ai is not None:
+                self.controller.ai.update(battle, monotonic())
 
     def click(self, x, screen_y) -> None:
         controller = self.controller
@@ -61,12 +72,14 @@ class GameView(BattleView):
                 self.passive_hovered = False
                 return
             if battle.revival_pending is not None:
+                if self.controller.ai is not None and battle.revival_pending.team is Team.RED:
+                    return
                 for slot, suit in enumerate(Suit):
                     if self.hit(self.revival_card_bounds(slot), x, screen_y):
                         battle.choose_revival_card(suit)
                         break
                 return
-            if battle.is_over or self.card_revealing(battle):
+            if battle.is_over or self.ai_turn or self.card_revealing(battle):
                 return
             if self.action_panel_progress(battle) < 1:
                 return
@@ -123,7 +136,8 @@ class GameView(BattleView):
     def draw(self) -> None:
         if self.controller.stage is Stage.MOVEMENT:
             self.game = self.controller.battle
-            super().draw()
+            difficulty = self.controller.ai.policy.label if self.ai_turn else None
+            super().draw(ai_difficulty=difficulty)
             if self.help_overlay is not None:
                 self.help_overlay.draw(self)
             return

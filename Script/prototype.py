@@ -150,7 +150,7 @@ class Prototype:
             if not self.current.hero:
                 return "영웅화 후 사용 가능"
             used = self.current.hero_skill_round
-            if used is not None and self.turns.round <= used + 1:
+            if not self.current.hero_skill_available(self.turns.round):
                 return f"{used + 2}라운드부터 사용 가능"
         return None
 
@@ -363,17 +363,16 @@ class Prototype:
             if box.owner.current_hp == 0:
                 continue
             if box.owner.team is not self.current.team:
-                x, y = box.cell
-                x += 1 if box.owner.team is Team.BLUE else -1
-                if not self.board.in_territory(self.current.team, (x, y)):
+                cell = box.next_cell()
+                if not self.board.in_territory(self.current.team, cell):
                     continue
-                box.cell = x, y
+                box.cell = cell
                 box.damage += 10
                 moved.append(box.cell)
                 hit = self._box_hit(box)
                 if hit is not None:
                     hits.append(hit)
-                if x in (0, self.board.columns - 1):
+                if cell[0] in (0, self.board.columns - 1):
                     continue
             remaining.append(box)
         self.boxes = remaining

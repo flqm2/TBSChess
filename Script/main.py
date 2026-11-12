@@ -48,6 +48,7 @@ def handle_event(event, game: GameController, view: GameView) -> bool:
         if event.key == pico2d.SDLK_ESCAPE:
             return False
         if (event.key == pico2d.SDLK_SPACE and game.stage is Stage.MOVEMENT
+                and not view.ai_turn
                 and not view.initiative_revealing(game.battle)
                 and not view.card_revealing(game.battle)):
             game.battle.skip_turn()

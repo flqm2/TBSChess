@@ -49,6 +49,11 @@ def mage_bonus(caster: Piece, cell: Cell) -> int:
     return 5 * (abs(cell[0] - x) + abs(cell[1] - y))
 
 
+def attack_damage(caster: Piece, target: Piece, base_damage: int, protected: set[str]) -> int:
+    reduction = 90 if target.identifier in protected else 100
+    return base_damage * (100 + mage_bonus(caster, target.position)) * reduction // 10000
+
+
 def apply_damage(board: Board, caster: Piece, target: Piece, base_damage: int,
                  protected: set[str], marks: int = 0) -> DamageResult:
     name = f"{target.identifier} {target.name}"
@@ -56,8 +61,7 @@ def apply_damage(board: Board, caster: Piece, target: Piece, base_damage: int,
         target.shield = False
         return DamageResult(0, f"{name} · 보호막으로 공격 차단", blocked=True)
 
-    reduction = 90 if target.identifier in protected else 100
-    damage = base_damage * (100 + mage_bonus(caster, target.position)) * reduction // 10000
+    damage = attack_damage(caster, target, base_damage, protected)
     before = target.current_hp
     target.current_hp = max(0, before - damage)
     executed = False

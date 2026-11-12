@@ -2,6 +2,7 @@
 
 from enum import Enum
 
+from ai_controller import AIController, NormalPolicy
 from deployment import Deployment
 from piece import Piece
 from prototype import Prototype
@@ -15,8 +16,9 @@ class Stage(Enum):
 
 
 class GameController:
-    def __init__(self):
+    def __init__(self, *, red_ai: bool = True):
         self.stage = Stage.SELECTION
+        self.ai = AIController(NormalPolicy()) if red_ai else None
         self.roster = RosterSelection()
         self.deployment: Deployment | None = None
         self.battle: Prototype | None = None

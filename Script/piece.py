@@ -51,3 +51,6 @@ class Piece:
         self.current_hp = self.max_hp
         self.facing = 1 if self.team is Team.BLUE else -1
 
+    def hero_skill_available(self, round_number: int) -> bool:
+        return self.hero and (self.hero_skill_round is None or round_number >= self.hero_skill_round + 2)
+

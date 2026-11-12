@@ -146,7 +146,7 @@ class BattleView:
         if filled:
             self.rectangle((x, y, x + filled - 1, top), self.team_color(piece.team))
 
-    def draw(self) -> None:
+    def draw(self, ai_difficulty: str | None = None) -> None:
         announcing = self.initiative_revealing(self.game)
         revealing = not announcing and self.card_revealing(self.game)
         self.rectangle((0, 0, self.width - 1, self.height - 1), self.background)
@@ -154,7 +154,10 @@ class BattleView:
         self.draw_turn_order()
         self.draw_board()
         self.draw_details()
-        self.draw_actions(announcing or revealing)
+        if ai_difficulty is not None:
+            self.draw_ai_actions(ai_difficulty)
+        else:
+            self.draw_actions(announcing or revealing)
         self.draw_footer(revealing)
         self.draw_combat_notice()
         self.draw_passive_icon(self.game.current)
@@ -403,6 +406,19 @@ class BattleView:
             left, bottom, right, top = self.action_panel
             self.rectangle((left + 1, bottom + 1, right - 1, top - 1 - int((top - bottom - 2) * progress)),
                            (23, 31, 41))
+
+    def draw_ai_actions(self, difficulty: str) -> None:
+        left, bottom, right, top = self.action_panel
+        center = (left + right) // 2
+        self.rectangle(self.action_panel, (23, 31, 41))
+        self.rectangle(self.action_panel, (65, 79, 95), False)
+        self.centered_label(center, top - 45, f"홍팀 AI · {difficulty}", 26, self.red)
+        status = self.game.message
+        if self.game.selected_skill is not None:
+            status = f"{self.game.skills[self.game.selected_skill].name} 준비"
+        elif self.game.move_preview:
+            status = "이동 준비"
+        self.centered_label(center, bottom + 46, status, 18, self.muted)
 
     def draw_action_button(self, bounds, title, border, size, enabled=True) -> None:
         left, bottom, right, top = bounds
