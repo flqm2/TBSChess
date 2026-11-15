@@ -13,7 +13,7 @@ from cards import Suit
 from dice_view import DiceView
 from passives import DESCRIPTIONS, aura_cells
 from piece import Job, Piece, Team
-from portraits import load_grayscale_portrait, load_sprite
+from portraits import load_grayscale_portrait
 from prototype import ActionMode, Prototype
 
 
@@ -47,7 +47,7 @@ class BattleView:
         self.fonts = {size: pico2d.load_font(str(font), size) for size in (14, 16, 18, 20, 22, 26, 32, 46)}
         self.resource_dir = root / "Resource"
         self.images = {
-            character.image_name: load_sprite(self.resource_dir / character.image_name)
+            character.image_name: pico2d.load_image(str(self.resource_dir / character.image_name))
             for character in CHARACTERS
         }
         self.grayscale_portraits = {}
