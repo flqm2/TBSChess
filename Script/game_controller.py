@@ -53,7 +53,7 @@ class GameController:
         self.failed = False
 
     def start_battle(self, pieces: tuple[Piece, ...]) -> None:
-        self.battle = Prototype(pieces)
+        self.battle = Prototype(pieces, animate_skills=True)
         self.stage = Stage.MOVEMENT
 
     def back_to_selection(self) -> None:

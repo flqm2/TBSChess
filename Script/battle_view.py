@@ -8,19 +8,36 @@ from time import monotonic
 
 from pico2d import pico2d
 
-from character_data import CHARACTERS
+from character_data import CHARACTERS, CHARACTER_BY_ID
 from cards import Suit
 from dice_view import DiceView
+from mage_animation import MageAnimations, attack_duration
 from passives import DESCRIPTIONS, aura_cells
 from piece import Job, Piece, Team
-from portraits import load_grayscale_portrait
+from portraits import load_grayscale_portrait, load_portrait
 from prototype import ActionMode, Prototype
 
 
+CANVAS_WIDTH, CANVAS_HEIGHT = 1920, 1080
+# Full HD 배경의 줄별 타일 경계. 청팀과 홍팀 경계 사이의 수로는 클릭 범위에서 제외한다.
+TILE_COLUMN_EDGES = (
+    ((413, 552, 692, 831, 971), (1015, 1155, 1294, 1433, 1572)),
+    ((413, 554, 693, 832, 973), (1016, 1156, 1295, 1434, 1574)),
+    ((413, 555, 694, 833, 973), (1017, 1157, 1296, 1435, 1576)),
+    ((413, 555, 695, 834, 974), (1018, 1158, 1297, 1437, 1577)),
+)
+TILE_ROW_EDGES = (260, 388, 518, 646, 773)
+ROW_COLUMNS = tuple(
+    (*zip(blue, blue[1:]), *zip(red, red[1:])) for blue, red in TILE_COLUMN_EDGES
+)
+ROWS = tuple((CANVAS_HEIGHT - bottom, CANVAS_HEIGHT - top)
+             for top, bottom in zip(TILE_ROW_EDGES, TILE_ROW_EDGES[1:]))
+PIECE_FOOT_INSET = 22
+
+
 class BattleView:
-    width, height = 1920, 1080
-    board_x, board_y = 94, 306
-    cell_width, cell_height = 204, 135
+    width, height = CANVAS_WIDTH, CANVAS_HEIGHT
+    hud_x = 94
     action_panel = (460, 89, 1726, 228)
     attack_button = (460, 89, 1084, 228)
     move_button = (1102, 89, 1726, 228)
@@ -35,6 +52,8 @@ class BattleView:
     red = (244, 143, 141)
     accent = (243, 211, 132)
     card_reveal_seconds = 0.8
+    hit_feedback_seconds = 0.8
+    cast_flash_seconds = 0.22
     movement_labels = {Job.MELEE: "상하좌우 1칸", Job.RANGED: "대각선 1칸", Job.JOKER: "전 방향 1칸"}
 
     def __init__(self, game: Prototype | None = None):
@@ -46,11 +65,14 @@ class BattleView:
             raise FileNotFoundError("한국어 표시를 위한 맑은 고딕 또는 굴림 글꼴이 필요합니다.")
         self.fonts = {size: pico2d.load_font(str(font), size) for size in (14, 16, 18, 20, 22, 26, 32, 46)}
         self.resource_dir = root / "Resource"
-        self.images = {
-            character.image_name: pico2d.load_image(str(self.resource_dir / character.image_name))
-            for character in CHARACTERS
-        }
+        self.images = {}
+        self.sprite_layouts = {}
+        for character in CHARACTERS:
+            name = character.image_name
+            self.images[name], self.sprite_layouts[name] = load_portrait(self.resource_dir / name)
         self.grayscale_portraits = {}
+        self.mage_animations = MageAnimations(self.resource_dir, self.sprite_layouts[CHARACTER_BY_ID["mage"].image_name])
+        self.battlefield = pico2d.load_image(str(self.resource_dir / "battlefield.png"))
         card_dir = self.resource_dir / "Cards"
         self.card_faces = {suit: pico2d.load_image(str(card_dir / f"ace_{suit.slug}.png")) for suit in Suit}
         self.card_back = pico2d.load_image(str(card_dir / "back.png"))
@@ -58,6 +80,9 @@ class BattleView:
         self.help_button = (self.width - 91, 22, self.width - 29, 80)
         self.hover: tuple[int, int] | None = None
         self.passive_hovered = False
+        self._combat_battle = None
+        self._shown_attack = None
+        self._attack_started = 0.0
         self._shown_cast = None
         self._cast_started = 0.0
         self._shown_draw = None
@@ -88,24 +113,71 @@ class BattleView:
         final = battle.final_battle
         return self.dice_view.showing(battle.initiative, delay=0.8 if final and final.sudden_death else 0.0)
 
+    def _sync_combat(self, battle: Prototype, now: float) -> None:
+        if battle is not self._combat_battle:
+            self._combat_battle = battle
+            self._shown_attack = self._shown_cast = None
+        if battle.pending_skill is not self._shown_attack:
+            self._shown_attack = battle.pending_skill
+            self._attack_started = now
+        if battle.last_cast is not self._shown_cast:
+            self._shown_cast = battle.last_cast
+            self._cast_started = now
+        self.mage_animations.sync(battle, now)
+
+    @staticmethod
+    def _attack_duration(battle: Prototype) -> float:
+        hero = battle.pending_skill.hero_skill
+        if battle.current.character_id == "mage":
+            return attack_duration(hero)
+        return 0.48 if hero else 0.32
+
+    def update_combat(self, battle: Prototype) -> None:
+        now = monotonic()
+        self._sync_combat(battle, now)
+        if battle.pending_skill is not None and now - self._attack_started >= self._attack_duration(battle):
+            battle.resolve_pending_skill()
+            self._sync_combat(battle, now)
+
+    def _showing_impact(self, now: float) -> bool:
+        if self.mage_animations.playing_one_shot(now):
+            return True
+        cast = self._shown_cast
+        if cast is None:
+            return False
+        duration = self.hit_feedback_seconds if cast.hits else self.cast_flash_seconds
+        return now - self._cast_started < duration
+
+    def combat_animating(self, battle: Prototype) -> bool:
+        now = monotonic()
+        self._sync_combat(battle, now)
+        return battle.pending_skill is not None or self._showing_impact(now)
+
     @classmethod
     def cell_at_pixel(cls, x: int, screen_y: int) -> tuple[int, int] | None:
         """SDL 왼쪽 위 원점 입력을 보드 왼쪽 위 원점 좌표로 바꾼다."""
         canvas_y = cls.height - 1 - screen_y
-        column = (x - cls.board_x) // cls.cell_width
-        row_from_bottom = (canvas_y - cls.board_y) // cls.cell_height
-        if not (0 <= column < 8 and 0 <= row_from_bottom < 4):
+        row = next((i for i, (bottom, top) in enumerate(ROWS) if bottom <= canvas_y < top), None)
+        if row is None:
             return None
-        return column, 3 - row_from_bottom
+        return next(((column, row) for column, (left, right) in enumerate(ROW_COLUMNS[row])
+                     if left <= x < right), None)
 
     @classmethod
     def cell_center(cls, cell: tuple[int, int]) -> tuple[int, int]:
-        return (cls.board_x + cell[0] * cls.cell_width + cls.cell_width // 2,
-                cls.board_y + (3 - cell[1]) * cls.cell_height + cls.cell_height // 2)
+        left, bottom, right, top = cls.cell_bounds(cell)
+        return (left + right) // 2, (bottom + top) // 2
 
     @staticmethod
-    def rectangle(bounds, color, filled=True):
-        pico2d.draw_rectangle(*bounds, *color, filled=filled)
+    def rectangle(bounds, color, filled=True, alpha=255):
+        if alpha == 255:
+            pico2d.draw_rectangle(*bounds, *color, filled=filled)
+            return
+        blend = c_int()
+        pico2d.SDL_GetRenderDrawBlendMode(pico2d.renderer, byref(blend))
+        pico2d.SDL_SetRenderDrawBlendMode(pico2d.renderer, pico2d.SDL_BLENDMODE_BLEND)
+        pico2d.draw_rectangle(*bounds, *color, alpha, filled=filled)
+        pico2d.SDL_SetRenderDrawBlendMode(pico2d.renderer, blend.value)
 
     def dim(self) -> None:
         blend = c_int()
@@ -139,6 +211,13 @@ class BattleView:
     def team_color(self, team):
         return self.blue if team is Team.BLUE else self.red
 
+    def draw_arena(self) -> None:
+        self.battlefield.draw(self.width // 2, self.height // 2, self.width, self.height)
+
+    def shade_arena_hud(self, header_bottom: int, footer_top: int) -> None:
+        self.rectangle((0, header_bottom, self.width - 1, self.height - 1), self.background, alpha=192)
+        self.rectangle((0, 0, self.width - 1, footer_top), self.background, alpha=192)
+
     def draw_health_bar(self, piece: Piece, x: int, y: int, width: int, height: int) -> None:
         top = y + height - 1
         self.rectangle((x, y, x + width - 1, top), (12, 18, 24))
@@ -147,24 +226,33 @@ class BattleView:
             self.rectangle((x, y, x + filled - 1, top), self.team_color(piece.team))
 
     def draw(self, ai_difficulty: str | None = None) -> None:
-        announcing = self.initiative_revealing(self.game)
-        revealing = not announcing and self.card_revealing(self.game)
-        self.rectangle((0, 0, self.width - 1, self.height - 1), self.background)
-        self.draw_health_and_round(show_initiative=not announcing)
-        self.draw_turn_order()
+        animating = self.combat_animating(self.game)
+        pending = self.game.pending_skill
+        holding_turn = animating and pending is None
+        announcing = not animating and self.initiative_revealing(self.game)
+        revealing = not animating and not announcing and self.card_revealing(self.game)
+        self.draw_arena()
+        self.shade_arena_hud(932, 240)
         self.draw_board()
-        self.draw_details()
-        if ai_difficulty is not None:
-            self.draw_ai_actions(ai_difficulty)
-        else:
-            self.draw_actions(announcing or revealing)
-        self.draw_footer(revealing)
+        self.draw_health_and_round(show_initiative=not animating and not announcing)
+        if not holding_turn:
+            self.draw_turn_order()
+        if not holding_turn:
+            self.draw_details()
+        if not animating:
+            if ai_difficulty is not None:
+                self.draw_ai_actions(ai_difficulty)
+            else:
+                self.draw_actions(announcing or revealing)
+        action_text = f"{pending.skill.name} · 발동 중" if pending else "" if holding_turn else None
+        self.draw_footer(revealing, action_text)
         self.draw_combat_notice()
-        self.draw_passive_icon(self.game.current)
+        if not holding_turn:
+            self.draw_passive_icon(self.game.current)
         self.draw_action_button(self.help_button, "?", self.blue, 26)
         if announcing:
             self.dice_view.draw_announcement(self)
-        elif self.game.revival_pending is not None:
+        elif not animating and self.game.revival_pending is not None:
             self.draw_revival_choices()
         elif revealing:
             self.draw_card_reveal()
@@ -174,24 +262,24 @@ class BattleView:
         final = self.game.final_battle
         if final is None:
             self.centered_label(center, 1010, "라운드", 22, self.muted)
-            self.centered_label(center, 954, f"{self.game.turns.round:02}", 46, self.accent)
+            self.centered_label(center, 971, f"{self.game.turns.round:02}", 46, self.accent)
         else:
             title = "최종전 · 서든데스" if final.sudden_death else "최종전 · 경계 해제"
             self.centered_label(center, 1010, title, 22, self.accent)
-            self.centered_label(center, 954, f"{final.round:02}", 46, self.accent)
+            self.centered_label(center, 971, f"{final.round:02}", 46, self.accent)
         initiative = self.game.initiative
         if initiative is not None and show_initiative:
             blue, red = initiative.values
             for offset, team, value in ((-125, Team.BLUE, blue), (125, Team.RED, red)):
-                self.dice_view.draw_face(center + offset, 962, 48, value)
-                self.centered_label(center + offset, 925, team.value, 14, self.team_color(team))
+                self.dice_view.draw_face(center + offset, 983, 48, value)
+                self.centered_label(center + offset, 946, team.value, 14, self.team_color(team))
             first = initiative.first_team
-            self.centered_label(center, 905, f"{first.value} 선공", 16, self.team_color(first))
-        team_left = {Team.BLUE: self.board_x, Team.RED: self.width - self.board_x - 480}
+            self.centered_label(center, 940, f"{first.value} 선공", 16, self.team_color(first))
+        team_left = {Team.BLUE: self.hud_x, Team.RED: self.width - self.hud_x - 480}
         team_slots = {team: 0 for team in Team}
         for piece in self.game.board.pieces:
             left = team_left[piece.team]
-            y = 1024 - team_slots[piece.team] * 38
+            y = 1040 - team_slots[piece.team] * 31
             team_slots[piece.team] += 1
             label_color = self.team_color(piece.team) if piece.current_hp else self.muted
             self.label(left, y, f"{piece.identifier}  {piece.name}", 18, label_color)
@@ -216,7 +304,7 @@ class BattleView:
 
         progress = min(1.0, (now - self._stack_started) / 0.24)
         remaining = 0 if self.game.is_over else (1 - progress) ** 2
-        x = (self.board_x + 8 * self.cell_width + self.width) // 2
+        x = self.width - 99
         step, first_y = 77, 802
         rail = (x - 65, first_y - step * (len(order) - 1) - 44, x + 65, first_y + 44)
         self.rectangle(rail, (23, 31, 41))
@@ -254,43 +342,51 @@ class BattleView:
     def draw_board(self, board=None, current=None, legal=(), area_action="이동") -> None:
         battle = self.game if board is None else None
         attack = ()
+        pending = None
+        attack_age = 0.0
         cast = None
         age = 0.0
         now = monotonic()
         if battle is not None:
             board = battle.board
-            current = battle.current if not battle.is_over else None
+            self._sync_combat(battle, now)
+            pending = battle.pending_skill
+            attack_age = now - self._attack_started
+            current = battle.current if not battle.is_over and not self._showing_impact(now) else None
             legal = battle.legal_moves if battle.move_preview else ()
-            attack = battle.skill_preview
-            if battle.last_cast is not self._shown_cast:
-                self._shown_cast = battle.last_cast
-                self._cast_started = now
+            attack = pending.cells if pending else battle.skill_preview
             age = now - self._cast_started
-            if age < 0.8:
+            if age < self.hit_feedback_seconds:
                 cast = self._shown_cast
-        left, bottom = self.board_x, self.board_y
-        width, height = self.cell_width, self.cell_height
-        boundary = left + width * 4
-        right, top = left + width * 8, bottom + height * 4
         if board.boundary_open:
-            self.rectangle((left, bottom, right, top), (31, 42, 50))
-        else:
-            self.rectangle((left, bottom, boundary, top), (27, 43, 58))
-            self.rectangle((boundary, bottom, right, top), (51, 35, 44))
+            # 중앙 장벽 자리에 같은 이미지의 돌 바닥을 타일 높이에 맞춰 그린다.
+            scale_x = self.battlefield.w / self.width
+            scale_y = self.battlefield.h / self.height
+            source_left = round(885 * scale_x)
+            for (bottom, top), columns in zip(ROWS, ROW_COLUMNS):
+                left, right = columns[3][1] - 2, columns[4][0] + 2
+                width, height = right - left, top - bottom
+                source_bottom = round(bottom * scale_y)
+                source_width = round((885 + width) * scale_x) - source_left
+                source_height = round(top * scale_y) - source_bottom
+                self.battlefield.clip_draw(
+                    source_left, source_bottom, source_width, source_height,
+                    (left + right) / 2, (bottom + top) / 2, width, height,
+                )
         if battle is not None:
             for warrior in board.living_pieces:
                 if warrior.character_id != "warrior":
                     continue
                 for cell in aura_cells(board, warrior):
                     tint = (37, 56, 62) if cell[0] < 4 else (61, 48, 55)
-                    self.rectangle(self.cell_bounds(cell, 2), tint)
+                    self.rectangle(self.cell_bounds(cell, 3), tint, alpha=86)
         for cell in legal:
             x, y = self.cell_center(cell)
             self.draw_cell_fill(cell, (37, 75, 77), (94, 177, 166))
             self.centered_label(x, y, "·", 32, (145, 222, 202))
         for cell in attack:
             self.draw_cell_fill(cell, (30, 80, 126), self.blue)
-        if cast is not None and age < 0.22:
+        if cast is not None and age < self.cast_flash_seconds:
             for cell in cast.cells:
                 self.draw_cell_fill(cell, (43, 104, 147), self.blue)
             for hit in cast.hits:
@@ -298,52 +394,73 @@ class BattleView:
         if self.hover is not None:
             color = (145, 222, 202) if self.hover in legal else self.muted
             self.rectangle(self.cell_bounds(self.hover, 3), color, False)
-        for column in range(9):
-            x = left + column * width
-            pico2d.draw_line(x, bottom, x, top, 86, 99, 113)
-        for row in range(5):
-            y = bottom + row * height
-            pico2d.draw_line(left, y, right, y, 86, 99, 113)
-        if not board.boundary_open:
-            for offset in (-1, 0, 1):
-                pico2d.draw_line(boundary + offset, bottom, boundary + offset, top, *self.accent)
+        # 열 표시는 큰 기물의 머리에 가려지지 않도록 보드 아래에 둔다.
+        column_label_y = ROWS[-1][0] - 12
         for column in range(8):
-            self.centered_label(self.cell_center((column, 0))[0], top + 19, chr(ord("A") + column), 16, self.muted)
+            x, _ = self.cell_center((column, 3))
+            self.rectangle((x - 10, column_label_y - 9, x + 10, column_label_y + 9), self.background, alpha=210)
+            self.centered_label(x, column_label_y, chr(ord("A") + column), 14, self.text)
         for row in range(4):
-            self.centered_label(left - 24, self.cell_center((0, row))[1], str(row + 1), 16, self.muted)
+            x, y = ROW_COLUMNS[row][0][0] - 16, self.cell_center((0, row))[1]
+            self.rectangle((x - 9, y - 9, x + 9, y + 9), self.background, alpha=210)
+            self.centered_label(x, y, str(row + 1), 14, self.text)
+        if current is not None:
+            self.rectangle(self.cell_bounds(current.position, 3), self.accent, False)
+        hit_ids = {hit.piece_id for hit in cast.hits} if cast is not None and age < self.cast_flash_seconds else set()
+        # 앞줄 기물이 윗줄 타일까지 올라오면 앞줄을 나중에 그려 깊이를 표현한다.
+        for piece in sorted(board.pieces, key=lambda piece: piece.position[1]):
+            animated_mage = battle is not None and piece.character_id == "mage"
+            if piece.current_hp == 0 and not animated_mage:
+                continue
+            x, _ = self.cell_center(piece.position)
+            left, bottom, right, _ = self.cell_bounds(piece.position)
+            width = right - left
+            foot_y = bottom + PIECE_FOOT_INSET
+            attacking = pending is not None and piece is battle.current
+            if animated_mage:
+                if attacking:
+                    self.mage_animations.draw_attack(piece, x, foot_y, width, pending.hero_skill, attack_age)
+                else:
+                    self.mage_animations.draw(piece, x, foot_y, width, now)
+                continue
+            shake = int(5 * sin(age * 65)) if piece.identifier in hit_ids else 0
+            motion = 0
+            if attacking:
+                progress = min(1.0, attack_age / self._attack_duration(battle))
+                motion = round((26 if pending.hero_skill else 18) * sin(pi * progress))
+            mirrored = piece.facing < 0 and (board.boundary_open or piece.character_id == "mage")
+            placement = self.sprite_layouts[piece.image_name].placement(
+                x + shake + piece.facing * motion, foot_y + motion // 4, width, mirrored,
+            )
+            self.images[piece.image_name].composite_draw(0, "h" if mirrored else "", *placement)
         if battle is not None:
             for box in battle.boxes:
                 if box.owner.current_hp > 0:
-                    x, y = self.cell_center(box.cell)
-                    bounds = (x + 59, y + 31, x + 93, y + 55)
+                    _, _, right, top = self.cell_bounds(box.cell)
+                    bounds = (right - 32, top - 26, right - 4, top - 4)
                     self.rectangle(bounds, (89, 54, 104))
                     self.rectangle(bounds, self.accent, False)
-                    self.centered_label(x + 76, y + 43, str(box.damage), 16, self.accent)
-        hit_ids = {hit.piece_id for hit in cast.hits} if cast is not None and age < 0.22 else set()
+                    self.centered_label(right - 18, top - 15, str(box.damage), 16, self.accent)
         for piece in board.living_pieces:
-            x, y = self.cell_center(piece.position)
-            color = self.team_color(piece.team)
-            active = current is not None and piece.identifier == current.identifier
-            if active:
-                self.rectangle(self.cell_bounds(piece.position, 3), self.accent, False)
-            shake = int(5 * sin(age * 65)) if piece.identifier in hit_ids else 0
-            self.portrait(piece, x + shake, y + 3, 126, 88, mirrored=board.boundary_open and piece.facing < 0)
+            left, bottom, right, top = self.cell_bounds(piece.position)
             name = f"{piece.identifier} {piece.name}"
             if board.boundary_open:
                 name += "  →" if piece.facing > 0 else "  ←"
-            self.centered_label(x, y - 49, name, 16, color)
-            if battle is not None and active:
-                self.centered_label(x, y + 54 + int(4 * sin(now * tau / 0.8)), "▼", 18, self.accent)
+            self.rectangle((left + 3, bottom + 2, right - 3, bottom + 20), self.background, alpha=222)
+            self.centered_label((left + right) // 2, bottom + 11, name, 16, self.team_color(piece.team))
+            if battle is not None and piece is current:
+                self.centered_label(left + 12, top - 13 + int(3 * sin(now * tau / 0.8)), "▼", 18, self.accent)
             if battle is not None and piece.marks:
-                self.rectangle((x + 57, y - 3, x + 95, y + 21), (66, 38, 88))
-                self.centered_label(x + 76, y + 9, f"◆ {sum(piece.marks.values())}", 14, (238, 192, 255))
+                self.rectangle((right - 37, bottom + 23, right - 3, bottom + 45), (66, 38, 88))
+                self.centered_label(right - 20, bottom + 34, f"◆ {sum(piece.marks.values())}", 14, (238, 192, 255))
             if battle is not None and piece.stunned:
-                self.label(x - 93, y + 39, "기절", 16, self.accent)
-        if battle is not None:
+                self.rectangle((left + 4, top - 26, left + 44, top - 6), (48, 39, 29))
+                self.label(left + 9, top - 16, "기절", 16, self.accent)
+        if battle is not None and pending is None:
             for cell, percent in battle.mage_preview:
-                x, y = self.cell_center(cell)
-                self.rectangle((x - 75, y + 31, x + 75, y + 56), (23, 39, 58))
-                self.centered_label(x, y + 44, f"+{percent}% 추가 피해", 16, self.accent)
+                left, _, right, top = self.cell_bounds(cell)
+                self.rectangle((left + 3, top - 24, right - 3, top - 2), (23, 39, 58))
+                self.centered_label((left + right) // 2, top - 13, f"+{percent}% 추가 피해", 14, self.accent)
         if cast is not None:
             for hit in cast.hits:
                 x, y = self.cell_center(hit.cell)
@@ -351,18 +468,22 @@ class BattleView:
                 self.centered_label(x + 1, y - 1, f"-{hit.damage}", 26, (23, 14, 20))
                 self.centered_label(x, y, f"-{hit.damage}", 26, (255, 180, 157))
         if battle is None:
-            self.label(left, bottom - 20, f"청팀 {area_action} 영역", 14, self.blue)
-            self.label(boundary + 8, bottom - 20, f"홍팀 {area_action} 영역", 14, self.red)
+            columns = ROW_COLUMNS[-1]
+            self.centered_label((columns[0][0] + columns[3][1]) // 2, ROWS[-1][0] - 35,
+                                f"청팀 {area_action} 영역", 14, self.text)
+            self.centered_label((columns[4][0] + columns[-1][1]) // 2, ROWS[-1][0] - 35,
+                                f"홍팀 {area_action} 영역", 14, self.text)
 
-    def cell_bounds(self, cell, inset):
-        x, y = self.cell_center(cell)
-        half_width = self.cell_width // 2 - inset
-        half_height = self.cell_height // 2 - inset
-        return x - half_width, y - half_height, x + half_width, y + half_height
+    @staticmethod
+    def cell_bounds(cell, inset=0):
+        column, row = cell
+        left, right = ROW_COLUMNS[row][column]
+        bottom, top = ROWS[row]
+        return left + inset, bottom + inset, right - inset, top - inset
 
     def draw_cell_fill(self, cell, color, border) -> None:
         bounds = self.cell_bounds(cell, 5)
-        self.rectangle(bounds, color)
+        self.rectangle(bounds, color, alpha=155)
         self.rectangle(bounds, border, False)
 
     @staticmethod
@@ -481,7 +602,9 @@ class BattleView:
 
     def draw_card_reveal(self) -> None:
         progress = min(1.0, (monotonic() - self._draw_started) / self.card_reveal_seconds)
-        x, y = self.board_x + 4 * self.cell_width, 543 + 46 * min(1.0, progress / 0.28)
+        columns = ROW_COLUMNS[1]
+        x = (columns[3][1] + columns[4][0]) // 2
+        y = (ROWS[0][1] + ROWS[-1][0]) // 2 + 46 * min(1.0, progress / 0.28)
         width, height = 128.0, 179.0
         if progress > 0.67:
             slide = min(1.0, (progress - 0.67) / 0.33)
@@ -569,9 +692,11 @@ class BattleView:
             self.card_faces[suit].draw((left + right) // 2, 565, 80, 112)
             self.centered_label((left + right) // 2, 489, f"{suit.label} A", 18, self.accent)
 
-    def draw_footer(self, revealing: bool = False) -> None:
+    def draw_footer(self, revealing: bool = False, action_text: str | None = None) -> None:
         color = self.red if self.game.failed and not revealing else self.text
         message = "카드를 뽑습니다." if revealing else self.game.message
+        if action_text is not None:
+            message = action_text
         self.label(460, 60, message, 18, color)
         if self.game.history:
             self.label(460, 30, self.game.history[0], 16, self.muted)

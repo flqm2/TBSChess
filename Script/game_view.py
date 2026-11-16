@@ -30,7 +30,7 @@ class GameView(BattleView):
     @staticmethod
     def deployment_slot_bounds(index):
         x = 94 + index * 409
-        return x, 905, x + 392, 964
+        return x, 933, x + 392, 977
 
     @classmethod
     def hit(cls, bounds, x, screen_y):
@@ -47,7 +47,8 @@ class GameView(BattleView):
             return
         if self.controller.stage is Stage.MOVEMENT:
             battle = self.controller.battle
-            if self.initiative_revealing(battle) or self.card_revealing(battle):
+            self.update_combat(battle)
+            if self.combat_animating(battle) or self.initiative_revealing(battle) or self.card_revealing(battle):
                 return
             if battle.redraw_pending:
                 battle.resolve_redraw()
@@ -58,7 +59,7 @@ class GameView(BattleView):
         controller = self.controller
         if controller.stage is Stage.MOVEMENT:
             battle = controller.battle
-            if self.initiative_revealing(battle):
+            if self.combat_animating(battle) or self.initiative_revealing(battle):
                 return
             if self.help_overlay is not None:
                 if self.hit(self.help_overlay.close_button, x, screen_y):
@@ -141,7 +142,11 @@ class GameView(BattleView):
             if self.help_overlay is not None:
                 self.help_overlay.draw(self)
             return
-        self.rectangle((0, 0, self.width - 1, self.height - 1), self.background)
+        self.draw_arena()
+        if self.controller.stage is Stage.SELECTION:
+            self.rectangle((0, 0, self.width - 1, self.height - 1), self.background, alpha=150)
+        else:
+            self.shade_arena_hud(929, 255)
         self.label(94, 1020, "전략 RPG 체스", 32)
         self.label(1360, 1020, "선택 → 배치 → 전투", 22, self.accent)
         if self.controller.stage is Stage.SELECTION:
@@ -191,16 +196,17 @@ class GameView(BattleView):
 
     def draw_deployment(self):
         deployment = self.controller.deployment
-        self.label(94, 986, "왼쪽 진영에 4기 배치 · 상단 기물이나 배치된 기물을 눌러 위치 수정", 20, self.muted)
+        self.label(94, 994, "왼쪽 진영에 4기 배치 · 상단 기물이나 배치된 기물을 눌러 위치 수정", 20, self.muted)
         for index, character in enumerate(deployment.selected):
             bounds = self.deployment_slot_bounds(index)
-            x = bounds[0]
+            x, bottom, _, top = bounds
+            y = (bottom + top) // 2
             active = index == deployment.active_index
             self.rectangle(bounds, (36, 47, 60) if active else (26, 34, 45))
             self.rectangle(bounds, self.accent if active else (65, 79, 95), False)
-            self.label(x + 18, 934, f"청{index + 1} {character.name}", 22, self.blue)
+            self.label(x + 18, y, f"청{index + 1} {character.name}", 22, self.blue)
             cell = deployment.positions[index]
-            self.label(x + 285, 934, Prototype.cell_name(cell) if cell is not None else "미배치", 18, self.muted)
+            self.label(x + 285, y, Prototype.cell_name(cell) if cell is not None else "미배치", 18, self.muted)
         board = deployment.board
         current = next((p for p in board.pieces if p.identifier == f"청{deployment.active_index + 1}"), None)
         self.draw_board(board=board, current=current, area_action="배치")
