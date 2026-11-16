@@ -8,9 +8,10 @@ from time import monotonic
 
 from pico2d import pico2d
 
-from character_data import CHARACTERS
+from character_data import CHARACTERS, CHARACTER_BY_ID
 from cards import Suit
 from dice_view import DiceView
+from mage_animation import MageAnimations, attack_duration
 from passives import DESCRIPTIONS, aura_cells
 from piece import Job, Piece, Team
 from portraits import load_grayscale_portrait, load_portrait
@@ -70,6 +71,7 @@ class BattleView:
             name = character.image_name
             self.images[name], self.sprite_layouts[name] = load_portrait(self.resource_dir / name)
         self.grayscale_portraits = {}
+        self.mage_animations = MageAnimations(self.resource_dir, self.sprite_layouts[CHARACTER_BY_ID["mage"].image_name])
         self.battlefield = pico2d.load_image(str(self.resource_dir / "battlefield.png"))
         card_dir = self.resource_dir / "Cards"
         self.card_faces = {suit: pico2d.load_image(str(card_dir / f"ace_{suit.slug}.png")) for suit in Suit}
@@ -78,6 +80,9 @@ class BattleView:
         self.help_button = (self.width - 91, 22, self.width - 29, 80)
         self.hover: tuple[int, int] | None = None
         self.passive_hovered = False
+        self._combat_battle = None
+        self._shown_attack = None
+        self._attack_started = 0.0
         self._shown_cast = None
         self._cast_started = 0.0
         self._shown_draw = None
@@ -107,6 +112,46 @@ class BattleView:
     def initiative_revealing(self, battle: Prototype) -> bool:
         final = battle.final_battle
         return self.dice_view.showing(battle.initiative, delay=0.8 if final and final.sudden_death else 0.0)
+
+    def _sync_combat(self, battle: Prototype, now: float) -> None:
+        if battle is not self._combat_battle:
+            self._combat_battle = battle
+            self._shown_attack = self._shown_cast = None
+        if battle.pending_skill is not self._shown_attack:
+            self._shown_attack = battle.pending_skill
+            self._attack_started = now
+        if battle.last_cast is not self._shown_cast:
+            self._shown_cast = battle.last_cast
+            self._cast_started = now
+        self.mage_animations.sync(battle, now)
+
+    @staticmethod
+    def _attack_duration(battle: Prototype) -> float:
+        hero = battle.pending_skill.hero_skill
+        if battle.current.character_id == "mage":
+            return attack_duration(hero)
+        return 0.48 if hero else 0.32
+
+    def update_combat(self, battle: Prototype) -> None:
+        now = monotonic()
+        self._sync_combat(battle, now)
+        if battle.pending_skill is not None and now - self._attack_started >= self._attack_duration(battle):
+            battle.resolve_pending_skill()
+            self._sync_combat(battle, now)
+
+    def _showing_impact(self, now: float) -> bool:
+        if self.mage_animations.playing_one_shot(now):
+            return True
+        cast = self._shown_cast
+        if cast is None:
+            return False
+        duration = self.hit_feedback_seconds if cast.hits else self.cast_flash_seconds
+        return now - self._cast_started < duration
+
+    def combat_animating(self, battle: Prototype) -> bool:
+        now = monotonic()
+        self._sync_combat(battle, now)
+        return battle.pending_skill is not None or self._showing_impact(now)
 
     @classmethod
     def cell_at_pixel(cls, x: int, screen_y: int) -> tuple[int, int] | None:
@@ -181,25 +226,33 @@ class BattleView:
             self.rectangle((x, y, x + filled - 1, top), self.team_color(piece.team))
 
     def draw(self, ai_difficulty: str | None = None) -> None:
-        announcing = self.initiative_revealing(self.game)
-        revealing = not announcing and self.card_revealing(self.game)
+        animating = self.combat_animating(self.game)
+        pending = self.game.pending_skill
+        holding_turn = animating and pending is None
+        announcing = not animating and self.initiative_revealing(self.game)
+        revealing = not animating and not announcing and self.card_revealing(self.game)
         self.draw_arena()
         self.shade_arena_hud(932, 240)
         self.draw_board()
-        self.draw_health_and_round(show_initiative=not announcing)
-        self.draw_turn_order()
-        self.draw_details()
-        if ai_difficulty is not None:
-            self.draw_ai_actions(ai_difficulty)
-        else:
-            self.draw_actions(announcing or revealing)
-        self.draw_footer(revealing)
+        self.draw_health_and_round(show_initiative=not animating and not announcing)
+        if not holding_turn:
+            self.draw_turn_order()
+        if not holding_turn:
+            self.draw_details()
+        if not animating:
+            if ai_difficulty is not None:
+                self.draw_ai_actions(ai_difficulty)
+            else:
+                self.draw_actions(announcing or revealing)
+        action_text = f"{pending.skill.name} · 발동 중" if pending else "" if holding_turn else None
+        self.draw_footer(revealing, action_text)
         self.draw_combat_notice()
-        self.draw_passive_icon(self.game.current)
+        if not holding_turn:
+            self.draw_passive_icon(self.game.current)
         self.draw_action_button(self.help_button, "?", self.blue, 26)
         if announcing:
             self.dice_view.draw_announcement(self)
-        elif self.game.revival_pending is not None:
+        elif not animating and self.game.revival_pending is not None:
             self.draw_revival_choices()
         elif revealing:
             self.draw_card_reveal()
@@ -289,17 +342,19 @@ class BattleView:
     def draw_board(self, board=None, current=None, legal=(), area_action="이동") -> None:
         battle = self.game if board is None else None
         attack = ()
+        pending = None
+        attack_age = 0.0
         cast = None
         age = 0.0
         now = monotonic()
         if battle is not None:
             board = battle.board
-            current = battle.current if not battle.is_over else None
+            self._sync_combat(battle, now)
+            pending = battle.pending_skill
+            attack_age = now - self._attack_started
+            current = battle.current if not battle.is_over and not self._showing_impact(now) else None
             legal = battle.legal_moves if battle.move_preview else ()
-            attack = battle.skill_preview
-            if battle.last_cast is not self._shown_cast:
-                self._shown_cast = battle.last_cast
-                self._cast_started = now
+            attack = pending.cells if pending else battle.skill_preview
             age = now - self._cast_started
             if age < self.hit_feedback_seconds:
                 cast = self._shown_cast
@@ -353,14 +408,30 @@ class BattleView:
             self.rectangle(self.cell_bounds(current.position, 3), self.accent, False)
         hit_ids = {hit.piece_id for hit in cast.hits} if cast is not None and age < self.cast_flash_seconds else set()
         # 앞줄 기물이 윗줄 타일까지 올라오면 앞줄을 나중에 그려 깊이를 표현한다.
-        for piece in sorted(board.living_pieces, key=lambda piece: piece.position[1]):
+        for piece in sorted(board.pieces, key=lambda piece: piece.position[1]):
+            animated_mage = battle is not None and piece.character_id == "mage"
+            if piece.current_hp == 0 and not animated_mage:
+                continue
             x, _ = self.cell_center(piece.position)
             left, bottom, right, _ = self.cell_bounds(piece.position)
             width = right - left
             foot_y = bottom + PIECE_FOOT_INSET
+            attacking = pending is not None and piece is battle.current
+            if animated_mage:
+                if attacking:
+                    self.mage_animations.draw_attack(piece, x, foot_y, width, pending.hero_skill, attack_age)
+                else:
+                    self.mage_animations.draw(piece, x, foot_y, width, now)
+                continue
             shake = int(5 * sin(age * 65)) if piece.identifier in hit_ids else 0
+            motion = 0
+            if attacking:
+                progress = min(1.0, attack_age / self._attack_duration(battle))
+                motion = round((26 if pending.hero_skill else 18) * sin(pi * progress))
             mirrored = piece.facing < 0 and (board.boundary_open or piece.character_id == "mage")
-            placement = self.sprite_layouts[piece.image_name].placement(x + shake, foot_y, width, mirrored)
+            placement = self.sprite_layouts[piece.image_name].placement(
+                x + shake + piece.facing * motion, foot_y + motion // 4, width, mirrored,
+            )
             self.images[piece.image_name].composite_draw(0, "h" if mirrored else "", *placement)
         if battle is not None:
             for box in battle.boxes:
@@ -385,7 +456,7 @@ class BattleView:
             if battle is not None and piece.stunned:
                 self.rectangle((left + 4, top - 26, left + 44, top - 6), (48, 39, 29))
                 self.label(left + 9, top - 16, "기절", 16, self.accent)
-        if battle is not None:
+        if battle is not None and pending is None:
             for cell, percent in battle.mage_preview:
                 left, _, right, top = self.cell_bounds(cell)
                 self.rectangle((left + 3, top - 24, right - 3, top - 2), (23, 39, 58))
@@ -621,9 +692,11 @@ class BattleView:
             self.card_faces[suit].draw((left + right) // 2, 565, 80, 112)
             self.centered_label((left + right) // 2, 489, f"{suit.label} A", 18, self.accent)
 
-    def draw_footer(self, revealing: bool = False) -> None:
+    def draw_footer(self, revealing: bool = False, action_text: str | None = None) -> None:
         color = self.red if self.game.failed and not revealing else self.text
         message = "카드를 뽑습니다." if revealing else self.game.message
+        if action_text is not None:
+            message = action_text
         self.label(460, 60, message, 18, color)
         if self.game.history:
             self.label(460, 30, self.game.history[0], 16, self.muted)

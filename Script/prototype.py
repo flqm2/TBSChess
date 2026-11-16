@@ -23,12 +23,25 @@ class Hit:
     piece_id: str
     cell: Cell
     damage: int
+    stun_applied: bool = False
 
 
 @dataclass(frozen=True)
 class SkillCast:
     cells: tuple[Cell, ...]
     hits: tuple[Hit, ...]
+    caster_id: str | None = None
+
+
+@dataclass(frozen=True)
+class PendingSkill:
+    slot: int
+    skill: Skill
+    cells: tuple[Cell, ...]
+
+    @property
+    def hero_skill(self) -> bool:
+        return self.slot == 2
 
 
 class ActionMode(Enum):
@@ -37,7 +50,7 @@ class ActionMode(Enum):
 
 
 class Prototype:
-    def __init__(self, pieces: Iterable[Piece]):
+    def __init__(self, pieces: Iterable[Piece], *, animate_skills: bool = False):
         self.board = Board(pieces)
         self.movement = MovementRules(self.board)
         self.failed = False
@@ -45,6 +58,8 @@ class Prototype:
         self.action_mode: ActionMode | None = None
         self.selected_skill: int | None = None
         self.last_cast: SkillCast | None = None
+        self.pending_skill: PendingSkill | None = None
+        self._animate_skills = animate_skills
         self.winner: Team | None = None
         self.drawn = False
         self.final_battle: FinalBattleRules | None = None
@@ -142,6 +157,8 @@ class Prototype:
     def skill_unavailable(self, slot: int) -> str | None:
         if self.is_over:
             return "경기 종료"
+        if self.pending_skill is not None:
+            return "스킬 발동 중"
         if self.revival_pending is not None:
             return "부활 카드 선택 중"
         if self.redraw_pending and not (slot == 0 and self.card_target_pending):
@@ -155,7 +172,8 @@ class Prototype:
         return None
 
     def open_movement(self) -> None:
-        if self.is_over or self.redraw_pending or self.revival_pending is not None:
+        if (self.is_over or self.pending_skill is not None
+                or self.redraw_pending or self.revival_pending is not None):
             return
         if not self.legal_moves:
             self.message, self.failed = "이동할 수 있는 칸이 없습니다.", True
@@ -166,7 +184,7 @@ class Prototype:
         self.message, self.failed = "보드에서 초록색 칸을 클릭하세요.", False
 
     def open_attack(self) -> None:
-        if (self.is_over or self.revival_pending is not None
+        if (self.is_over or self.pending_skill is not None or self.revival_pending is not None
                 or self.action_mode is ActionMode.ATTACK):
             return
         if self.redraw_pending and not self.card_target_pending:
@@ -177,7 +195,7 @@ class Prototype:
         self.failed = False
 
     def back_to_actions(self) -> None:
-        if self.is_over or self.action_mode is None:
+        if self.is_over or self.pending_skill is not None or self.action_mode is None:
             return
         if self.redraw_pending and not self.card_target_pending:
             return
@@ -194,7 +212,7 @@ class Prototype:
         skills = self.skills
         if not 0 <= slot < len(skills):
             return False
-        if self.redraw_pending:
+        if self.pending_skill is not None or self.redraw_pending:
             return False
         reason = self.skill_unavailable(slot)
         if reason is not None:
@@ -242,7 +260,7 @@ class Prototype:
         self.message, self.failed = "파란 칸에서 클로버의 대상을 고르세요.", False
 
     def resolve_redraw(self) -> None:
-        if not self.redraw_pending or self.card_target_pending:
+        if self.pending_skill is not None or not self.redraw_pending or self.card_target_pending:
             return
         skill = self.skills[0]
         cells = skill.cells(self.board, self.current)
@@ -252,7 +270,7 @@ class Prototype:
         self._cast(0, skill, cells)
 
     def choose_card_target(self, cell: Cell) -> bool:
-        if not self.card_target_pending:
+        if self.pending_skill is not None or not self.card_target_pending:
             return False
         if cell not in self.skill_preview:
             self.message, self.failed = "파란 칸에 있는 유효한 대상을 선택하세요.", True
@@ -261,11 +279,21 @@ class Prototype:
         return True
 
     def _cast(self, slot: int, skill: Skill, cells: tuple[Cell, ...]) -> None:
+        self.pending_skill = PendingSkill(slot, skill, cells)
+        if not self._animate_skills:
+            self.resolve_pending_skill()
+
+    def resolve_pending_skill(self) -> None:
+        pending = self.pending_skill
+        if pending is None:
+            return
+        self.pending_skill = None
         caster = self.current
-        self.last_cast = self._apply_skill(caster, skill, cells)
-        if slot == 2:
+        skill = pending.skill
+        cast = self._apply_skill(caster, skill, pending.cells)
+        if pending.hero_skill:
             caster.hero_skill_round = self.turns.round
-        hits = self.last_cast.hits
+        hits = cast.hits
         detail = f"{len(hits)}기 피격" if hits else "명중 없음"
         if skill.effect is Effect.EMPOWER:
             detail = "다음 공격 표식 강화"
@@ -274,13 +302,13 @@ class Prototype:
         elif skill.effect is Effect.HEAL_STRIKE:
             detail = f"자기 회복 · {detail}"
         elif skill.effect in TARGETED_EFFECTS:
-            detail = "위치 변경" if cells else "대상 없음"
+            detail = "위치 변경" if pending.cells else "대상 없음"
         elif skill.effect is Effect.MAGIC_BOX:
             detail = f"상자 설치 · {detail}"
         action = skill.name
-        if slot == 0 and self.card_draw is not None:
+        if pending.slot == 0 and self.card_draw is not None:
             action = f"{'카드 뽑기 → ' if self.redraw_pending else ''}{self.card_draw.suit.label} 카드 던지기"
-        self._finish_action(f"{action} · {detail}", self.last_cast)
+        self._finish_action(f"{action} · {detail}", cast)
 
     def _apply_skill(self, caster: Piece, skill: Skill, cells: tuple[Cell, ...]) -> SkillCast:
         if skill.effect is Effect.EMPOWER:
@@ -321,16 +349,19 @@ class Prototype:
                 continue
             if marks:
                 caster.empowered_mark = False
+            stun_applied = False
             if target.current_hp > 0 and not result.revived:
                 if skill.effect is Effect.STUN:
+                    was_stunned = target.stunned
                     if self.final_battle is None:
                         target.stunned = True
                     elif not self.final_battle.apply_stun(target):
                         self.combat_notices.append(("기절 면역", f"{target.identifier} {target.name}"))
+                    stun_applied = target.stunned and not was_stunned
                 elif skill.effect is Effect.PULL:
                     x, y = target.position
                     self._shift_piece(target, (x - forward, y))
-            hits.append(Hit(target.identifier, target.position, result.damage))
+            hits.append(Hit(target.identifier, target.position, result.damage, stun_applied))
         if skill.effect is Effect.RETREAT:
             x, y = caster.position
             self._shift_piece(caster, (x - forward, y))
@@ -438,6 +469,7 @@ class Prototype:
             self.last_cast = SkillCast(
                 tuple(dict.fromkeys(cell for result in casts for cell in result.cells)),
                 tuple(hit for result in casts for hit in result.hits),
+                piece.identifier if cast is not None else None,
             )
         summary = " · ".join((action, *heroes))
         if self.is_over:
@@ -473,7 +505,8 @@ class Prototype:
         return heroes
 
     def try_move(self, destination: tuple[int, int] | None) -> bool:
-        if self.is_over or self.redraw_pending or self.revival_pending is not None:
+        if (self.is_over or self.pending_skill is not None
+                or self.redraw_pending or self.revival_pending is not None):
             return False
         piece = self.current
         reason = self.movement.rejection(piece, destination)
@@ -487,7 +520,8 @@ class Prototype:
         return True
 
     def skip_turn(self) -> None:
-        if not self.is_over and not self.redraw_pending and self.revival_pending is None:
+        if (not self.is_over and self.pending_skill is None
+                and not self.redraw_pending and self.revival_pending is None):
             self._finish_action("턴 넘김")
 
     @staticmethod

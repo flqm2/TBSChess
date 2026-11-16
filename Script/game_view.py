@@ -47,7 +47,8 @@ class GameView(BattleView):
             return
         if self.controller.stage is Stage.MOVEMENT:
             battle = self.controller.battle
-            if self.initiative_revealing(battle) or self.card_revealing(battle):
+            self.update_combat(battle)
+            if self.combat_animating(battle) or self.initiative_revealing(battle) or self.card_revealing(battle):
                 return
             if battle.redraw_pending:
                 battle.resolve_redraw()
@@ -58,7 +59,7 @@ class GameView(BattleView):
         controller = self.controller
         if controller.stage is Stage.MOVEMENT:
             battle = controller.battle
-            if self.initiative_revealing(battle):
+            if self.combat_animating(battle) or self.initiative_revealing(battle):
                 return
             if self.help_overlay is not None:
                 if self.hit(self.help_overlay.close_button, x, screen_y):
