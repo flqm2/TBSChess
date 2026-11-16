@@ -23,6 +23,7 @@ class DamageResult:
     notice: str = ""
     blocked: bool = False
     revived: bool = False
+    passive_triggered: bool = False
 
 
 def aura_cells(board: Board, warrior: Piece) -> tuple[Cell, ...]:
@@ -81,7 +82,8 @@ def apply_damage(board: Board, caster: Piece, target: Piece, base_damage: int,
         if target.character_id == "cardmaster" and not target.passive_used:
             target.passive_used = True
             target.current_hp = max(1, target.max_hp // 5)
-            return DamageResult(lost, f"{name} · 부활, 체력 {target.current_hp} 회복", revived=True)
+            return DamageResult(lost, f"{name} · 부활, 체력 {target.current_hp} 회복",
+                                revived=True, passive_triggered=True)
         if executed:
             return DamageResult(lost, f"{name} · 표식 3개로 처치")
     elif not target.passive_used:
@@ -89,9 +91,9 @@ def apply_damage(board: Board, caster: Piece, target: Piece, base_damage: int,
             target.passive_used = True
             healed = target.max_hp * 3 // 10
             target.current_hp += healed
-            return DamageResult(lost, f"{name} · 체력 {healed} 회복")
+            return DamageResult(lost, f"{name} · 체력 {healed} 회복", passive_triggered=True)
         if target.character_id == "archer" and target.current_hp * 10 < target.max_hp * 3:
             target.passive_used = True
             target.shield = True
-            return DamageResult(lost, f"{name} · 보호막 획득")
+            return DamageResult(lost, f"{name} · 보호막 획득", passive_triggered=True)
     return DamageResult(lost)

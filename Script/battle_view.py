@@ -8,10 +8,10 @@ from time import monotonic
 
 from pico2d import pico2d
 
-from character_data import CHARACTERS, CHARACTER_BY_ID
+from character_animation import CharacterAnimations, attack_duration
+from character_data import CHARACTERS
 from cards import Suit
 from dice_view import DiceView
-from mage_animation import MageAnimations, attack_duration
 from passives import DESCRIPTIONS, aura_cells
 from piece import Job, Piece, Team
 from portraits import load_grayscale_portrait, load_portrait
@@ -71,7 +71,7 @@ class BattleView:
             name = character.image_name
             self.images[name], self.sprite_layouts[name] = load_portrait(self.resource_dir / name)
         self.grayscale_portraits = {}
-        self.mage_animations = MageAnimations(self.resource_dir, self.sprite_layouts[CHARACTER_BY_ID["mage"].image_name])
+        self.character_animations = CharacterAnimations(self.resource_dir, self.sprite_layouts)
         self.battlefield = pico2d.load_image(str(self.resource_dir / "battlefield.png"))
         card_dir = self.resource_dir / "Cards"
         self.card_faces = {suit: pico2d.load_image(str(card_dir / f"ace_{suit.slug}.png")) for suit in Suit}
@@ -123,14 +123,11 @@ class BattleView:
         if battle.last_cast is not self._shown_cast:
             self._shown_cast = battle.last_cast
             self._cast_started = now
-        self.mage_animations.sync(battle, now)
+        self.character_animations.sync(battle, now)
 
     @staticmethod
     def _attack_duration(battle: Prototype) -> float:
-        hero = battle.pending_skill.hero_skill
-        if battle.current.character_id == "mage":
-            return attack_duration(hero)
-        return 0.48 if hero else 0.32
+        return attack_duration(battle.current.character_id, battle.pending_skill.animation_slot)
 
     def update_combat(self, battle: Prototype) -> None:
         now = monotonic()
@@ -140,7 +137,7 @@ class BattleView:
             self._sync_combat(battle, now)
 
     def _showing_impact(self, now: float) -> bool:
-        if self.mage_animations.playing_one_shot(now):
+        if self.character_animations.playing_one_shot(now):
             return True
         cast = self._shown_cast
         if cast is None:
@@ -409,26 +406,29 @@ class BattleView:
         hit_ids = {hit.piece_id for hit in cast.hits} if cast is not None and age < self.cast_flash_seconds else set()
         # 앞줄 기물이 윗줄 타일까지 올라오면 앞줄을 나중에 그려 깊이를 표현한다.
         for piece in sorted(board.pieces, key=lambda piece: piece.position[1]):
-            animated_mage = battle is not None and piece.character_id == "mage"
-            if piece.current_hp == 0 and not animated_mage:
-                continue
             x, _ = self.cell_center(piece.position)
             left, bottom, right, _ = self.cell_bounds(piece.position)
             width = right - left
             foot_y = bottom + PIECE_FOOT_INSET
             attacking = pending is not None and piece is battle.current
-            if animated_mage:
-                if attacking:
-                    self.mage_animations.draw_attack(piece, x, foot_y, width, pending.hero_skill, attack_age)
-                else:
-                    self.mage_animations.draw(piece, x, foot_y, width, now)
-                continue
             shake = int(5 * sin(age * 65)) if piece.identifier in hit_ids else 0
+            if battle is not None:
+                if attacking:
+                    animated = self.character_animations.draw_attack(
+                        piece, x, foot_y, width, pending.animation_slot, attack_age,
+                    )
+                else:
+                    # 피격 시트가 없는 기물도 기존 흔들림 효과를 적용한다.
+                    animated = self.character_animations.draw(piece, x, foot_y, width, now, shake)
+                if animated:
+                    continue
+            if piece.current_hp == 0:
+                continue
             motion = 0
             if attacking:
                 progress = min(1.0, attack_age / self._attack_duration(battle))
                 motion = round((26 if pending.hero_skill else 18) * sin(pi * progress))
-            mirrored = piece.facing < 0 and (board.boundary_open or piece.character_id == "mage")
+            mirrored = piece.facing < 0
             placement = self.sprite_layouts[piece.image_name].placement(
                 x + shake + piece.facing * motion, foot_y + motion // 4, width, mirrored,
             )

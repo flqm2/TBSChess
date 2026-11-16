@@ -24,6 +24,7 @@ class Hit:
     cell: Cell
     damage: int
     stun_applied: bool = False
+    passive_triggered: bool = False
 
 
 @dataclass(frozen=True)
@@ -38,10 +39,15 @@ class PendingSkill:
     slot: int
     skill: Skill
     cells: tuple[Cell, ...]
+    redraw: bool = False
 
     @property
     def hero_skill(self) -> bool:
         return self.slot == 2
+
+    @property
+    def animation_slot(self) -> int:
+        return 1 if self.redraw else self.slot
 
 
 class ActionMode(Enum):
@@ -279,7 +285,7 @@ class Prototype:
         return True
 
     def _cast(self, slot: int, skill: Skill, cells: tuple[Cell, ...]) -> None:
-        self.pending_skill = PendingSkill(slot, skill, cells)
+        self.pending_skill = PendingSkill(slot, skill, cells, redraw=self.redraw_pending)
         if not self._animate_skills:
             self.resolve_pending_skill()
 
@@ -361,7 +367,8 @@ class Prototype:
                 elif skill.effect is Effect.PULL:
                     x, y = target.position
                     self._shift_piece(target, (x - forward, y))
-            hits.append(Hit(target.identifier, target.position, result.damage, stun_applied))
+            hits.append(Hit(target.identifier, target.position, result.damage,
+                            stun_applied=stun_applied, passive_triggered=result.passive_triggered))
         if skill.effect is Effect.RETREAT:
             x, y = caster.position
             self._shift_piece(caster, (x - forward, y))
@@ -376,7 +383,9 @@ class Prototype:
         if target is None or target.team is box.owner.team:
             return None
         result = self._hit(box.owner, target, box.damage, protected_pieces(self.board))
-        return None if result.blocked else Hit(target.identifier, box.cell, result.damage)
+        if result.blocked:
+            return None
+        return Hit(target.identifier, box.cell, result.damage, passive_triggered=result.passive_triggered)
 
     def _hit(self, caster: Piece, target: Piece, damage: int, protected: set[str], marks: int = 0) -> DamageResult:
         result = apply_damage(self.board, caster, target, damage, protected, marks)
