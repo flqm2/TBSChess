@@ -13,7 +13,7 @@ from cards import Suit
 from dice_view import DiceView
 from passives import DESCRIPTIONS, aura_cells
 from piece import Job, Piece, Team
-from portraits import load_grayscale_portrait
+from portraits import load_grayscale_portrait, load_portrait
 from prototype import ActionMode, Prototype
 
 
@@ -64,10 +64,11 @@ class BattleView:
             raise FileNotFoundError("한국어 표시를 위한 맑은 고딕 또는 굴림 글꼴이 필요합니다.")
         self.fonts = {size: pico2d.load_font(str(font), size) for size in (14, 16, 18, 20, 22, 26, 32, 46)}
         self.resource_dir = root / "Resource"
-        self.images = {
-            character.image_name: pico2d.load_image(str(self.resource_dir / character.image_name))
-            for character in CHARACTERS
-        }
+        self.images = {}
+        self.sprite_layouts = {}
+        for character in CHARACTERS:
+            name = character.image_name
+            self.images[name], self.sprite_layouts[name] = load_portrait(self.resource_dir / name)
         self.grayscale_portraits = {}
         self.battlefield = pico2d.load_image(str(self.resource_dir / "battlefield.png"))
         card_dir = self.resource_dir / "Cards"
@@ -358,8 +359,9 @@ class BattleView:
             width = right - left
             foot_y = bottom + PIECE_FOOT_INSET
             shake = int(5 * sin(age * 65)) if piece.identifier in hit_ids else 0
-            self.portrait(piece, x + shake, foot_y + 44, width - 16, 88,
-                          mirrored=board.boundary_open and piece.facing < 0)
+            mirrored = piece.facing < 0 and (board.boundary_open or piece.character_id == "mage")
+            placement = self.sprite_layouts[piece.image_name].placement(x + shake, foot_y, width, mirrored)
+            self.images[piece.image_name].composite_draw(0, "h" if mirrored else "", *placement)
         if battle is not None:
             for box in battle.boxes:
                 if box.owner.current_hp > 0:
