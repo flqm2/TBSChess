@@ -14,7 +14,7 @@ from cards import Suit
 from dice_view import DiceView
 from passives import DESCRIPTIONS, aura_cells
 from piece import Job, Piece, Team
-from portraits import load_grayscale_portrait, load_portrait
+from portraits import damage_tint, load_grayscale_portrait, load_portrait
 from prototype import ActionMode, Prototype
 
 
@@ -127,7 +127,7 @@ class BattleView:
 
     @staticmethod
     def _attack_duration(battle: Prototype) -> float:
-        return attack_duration(battle.current.character_id, battle.pending_skill.animation_slot)
+        return attack_duration(battle.current.character_id, battle.pending_skill.slot)
 
     def update_combat(self, battle: Prototype) -> None:
         now = monotonic()
@@ -403,25 +403,32 @@ class BattleView:
             self.centered_label(x, y, str(row + 1), 14, self.text)
         if current is not None:
             self.rectangle(self.cell_bounds(current.position, 3), self.accent, False)
-        hit_ids = {hit.piece_id for hit in cast.hits} if cast is not None and age < self.cast_flash_seconds else set()
+        hit_ids = set()
+        if cast is not None and age < self.cast_flash_seconds:
+            hit_ids = {hit.piece_id for hit in cast.hits if hit.damage > 0}
+        flash_channel = round(65 + 190 * min(1.0, age / self.cast_flash_seconds))
         # 앞줄 기물이 윗줄 타일까지 올라오면 앞줄을 나중에 그려 깊이를 표현한다.
         for piece in sorted(board.pieces, key=lambda piece: piece.position[1]):
             x, _ = self.cell_center(piece.position)
             _, bottom, _, _ = self.cell_bounds(piece.position)
             foot_y = bottom + PIECE_FOOT_INSET
             attacking = pending is not None and piece is battle.current
-            shake = int(5 * sin(age * 65)) if piece.identifier in hit_ids else 0
+            taking_damage = piece.identifier in hit_ids
+            shake = int(5 * sin(age * 65)) if taking_damage else 0
+            tint_channel = flash_channel if taking_damage else 255
             if battle is not None:
                 if attacking:
                     animated = self.character_animations.draw_attack(
-                        piece, x, foot_y, PIECE_HEIGHT, pending.animation_slot, attack_age,
+                        piece, x, foot_y, PIECE_HEIGHT, pending.slot, attack_age,
                     )
                 else:
                     # 피격 시트가 없는 기물도 기존 흔들림 효과를 적용한다.
-                    animated = self.character_animations.draw(piece, x, foot_y, PIECE_HEIGHT, now, shake)
+                    animated = self.character_animations.draw(
+                        piece, x, foot_y, PIECE_HEIGHT, now, shake, tint_channel,
+                    )
                 if animated:
                     continue
-            if piece.current_hp == 0:
+            if piece.current_hp == 0 and not taking_damage:
                 continue
             motion = 0
             if attacking:
@@ -431,7 +438,9 @@ class BattleView:
             placement = self.sprite_layouts[piece.image_name].placement(
                 x + shake + piece.facing * motion, foot_y + motion // 4, PIECE_HEIGHT, mirrored,
             )
-            self.images[piece.image_name].composite_draw(0, "h" if mirrored else "", *placement)
+            image = self.images[piece.image_name]
+            with damage_tint(image, tint_channel):
+                image.composite_draw(0, "h" if mirrored else "", *placement)
         if battle is not None:
             for box in battle.boxes:
                 if box.owner.current_hp > 0:

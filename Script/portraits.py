@@ -1,5 +1,6 @@
 """캐릭터 텍스처와 보드 위 배치를 위한 이미지 경계."""
 
+from contextlib import contextmanager
 from ctypes import c_ubyte, string_at
 from dataclasses import dataclass
 
@@ -25,6 +26,18 @@ class SpriteLayout:
 
 # 희미한 외곽 픽셀은 남겨 두되, 캐릭터 크기 계산에서는 제외한다.
 OPAQUE_ALPHA = bytes(0 if alpha < 128 else 255 for alpha in range(256))
+
+
+@contextmanager
+def damage_tint(image, channel: int):
+    if channel == 255:
+        yield
+        return
+    pico2d.SDL_SetTextureColorMod(image.texture, 255, channel, channel)
+    try:
+        yield
+    finally:
+        pico2d.SDL_SetTextureColorMod(image.texture, 255, 255, 255)
 
 
 def load_portrait(path):

@@ -32,6 +32,7 @@ class SkillCast:
     cells: tuple[Cell, ...]
     hits: tuple[Hit, ...]
     caster_id: str | None = None
+    follow_up_slot: int | None = None
 
 
 @dataclass(frozen=True)
@@ -39,15 +40,10 @@ class PendingSkill:
     slot: int
     skill: Skill
     cells: tuple[Cell, ...]
-    redraw: bool = False
 
     @property
     def hero_skill(self) -> bool:
         return self.slot == 2
-
-    @property
-    def animation_slot(self) -> int:
-        return 1 if self.redraw else self.slot
 
 
 class ActionMode(Enum):
@@ -240,12 +236,6 @@ class Prototype:
             self.message, self.failed = f"{skill.name} 범위. 같은 스킬 버튼을 다시 클릭해 발동하세요.", False
             return False
 
-        if skill.effect is Effect.REDRAW:
-            self.card_draw = CardDraw(choice(tuple(Suit)), redraw=True)
-            self.redraw_pending = True
-            self.selected_skill = None
-            self.message = "새 카드를 뽑습니다."
-            return True
         if skill.effect in TARGETED_EFFECTS:
             self._request_card_target()
             return False
@@ -285,8 +275,8 @@ class Prototype:
         return True
 
     def _cast(self, slot: int, skill: Skill, cells: tuple[Cell, ...]) -> None:
-        self.pending_skill = PendingSkill(slot, skill, cells, redraw=self.redraw_pending)
-        if not self._animate_skills:
+        self.pending_skill = PendingSkill(slot, skill, cells)
+        if not self._animate_skills or (slot == 0 and self.redraw_pending):
             self.resolve_pending_skill()
 
     def resolve_pending_skill(self) -> None:
@@ -296,6 +286,12 @@ class Prototype:
         self.pending_skill = None
         caster = self.current
         skill = pending.skill
+        if skill.effect is Effect.REDRAW:
+            self.card_draw = CardDraw(choice(tuple(Suit)), redraw=True)
+            self.redraw_pending = True
+            self.selected_skill = None
+            self.message = "새 카드를 뽑습니다."
+            return
         cast = self._apply_skill(caster, skill, pending.cells)
         if pending.hero_skill:
             caster.hero_skill_round = self.turns.round
@@ -312,9 +308,12 @@ class Prototype:
         elif skill.effect is Effect.MAGIC_BOX:
             detail = f"상자 설치 · {detail}"
         action = skill.name
+        follow_up_slot = None
         if pending.slot == 0 and self.card_draw is not None:
             action = f"{'카드 뽑기 → ' if self.redraw_pending else ''}{self.card_draw.suit.label} 카드 던지기"
-        self._finish_action(f"{action} · {detail}", cast)
+            if self.redraw_pending and self._animate_skills:
+                follow_up_slot = pending.slot
+        self._finish_action(f"{action} · {detail}", cast, follow_up_slot=follow_up_slot)
 
     def _apply_skill(self, caster: Piece, skill: Skill, cells: tuple[Cell, ...]) -> SkillCast:
         if skill.effect is Effect.EMPOWER:
@@ -445,7 +444,8 @@ class Prototype:
             self.combat_notices.append(("서든데스", "양 진영에 최대 체력의 10% 피해"))
         return order
 
-    def _finish_action(self, action: str, cast: SkillCast | None = None) -> None:
+    def _finish_action(self, action: str, cast: SkillCast | None = None, *,
+                       follow_up_slot: int | None = None) -> None:
         piece = self.current
         self.history.appendleft(f"R{self.turns.round:02}  {piece.identifier} {piece.name}  {action}")
         self.selected_skill = None
@@ -479,6 +479,7 @@ class Prototype:
                 tuple(dict.fromkeys(cell for result in casts for cell in result.cells)),
                 tuple(hit for result in casts for hit in result.hits),
                 piece.identifier if cast is not None else None,
+                follow_up_slot=follow_up_slot,
             )
         summary = " · ".join((action, *heroes))
         if self.is_over:

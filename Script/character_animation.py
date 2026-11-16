@@ -6,6 +6,7 @@ from pathlib import Path
 from pico2d import pico2d
 
 from character_data import CHARACTERS
+from portraits import damage_tint
 
 
 # 원본 픽셀의 2배 해상도로 텍스처를 올려 큰 시트도 작은 렌더러에서 재생한다.
@@ -142,20 +143,21 @@ class CharacterAnimations:
 
         for piece in battle.board.pieces:
             clips = CLIPS.get(piece.character_id, {})
+            names = []
+            if cast.caster_id == piece.identifier and cast.follow_up_slot is not None:
+                names.append(attack_clip(piece.character_id, cast.follow_up_slot))
             hits = tuple(hit for hit in cast.hits if hit.piece_id == piece.identifier)
-            if not hits or not clips:
-                continue
-            if piece.current_hp == 0:
-                names = ["death"]
-            else:
-                stunned = any(hit.stun_applied for hit in hits)
-                names = []
-                if not (stunned and "stun" in clips) and any(hit.damage > 0 for hit in hits):
-                    names.append("hit")
-                if any(hit.passive_triggered for hit in hits):
-                    names.append("passive")
-                if stunned:
-                    names.append("stun")
+            if hits:
+                if piece.current_hp == 0:
+                    names.append("death")
+                else:
+                    stunned = any(hit.stun_applied for hit in hits)
+                    if not (stunned and "stun" in clips) and any(hit.damage > 0 for hit in hits):
+                        names.append("hit")
+                    if any(hit.passive_triggered for hit in hits):
+                        names.append("passive")
+                    if stunned:
+                        names.append("stun")
             reactions = []
             started = now
             for name in names:
@@ -191,11 +193,12 @@ class CharacterAnimations:
                 return "idle", int(now * clip.fps) % clip.frames
         return None
 
-    def draw(self, piece, x: int, foot_y: int, height: int, now: float, shake: int = 0) -> bool:
+    def draw(self, piece, x: int, foot_y: int, height: int, now: float,
+             shake: int = 0, tint_channel: int = 255) -> bool:
         pose = self.frame(piece, now)
         if pose is None:
             return False
-        self._draw_frame(*pose, piece, x + (shake if pose[0] == "idle" else 0), foot_y, height)
+        self._draw_frame(*pose, piece, x + (shake if pose[0] == "idle" else 0), foot_y, height, tint_channel)
         return True
 
     def draw_attack(self, piece, x: int, foot_y: int, height: int, slot: int, elapsed: float) -> bool:
@@ -207,7 +210,8 @@ class CharacterAnimations:
         self._draw_frame(name, frame, piece, x, foot_y, height)
         return True
 
-    def _draw_frame(self, name: str, frame: int, piece, x: int, foot_y: int, height: int) -> None:
+    def _draw_frame(self, name: str, frame: int, piece, x: int, foot_y: int, height: int,
+                    tint_channel: int = 255) -> None:
         character_id = piece.character_id
         clip = CLIPS[character_id][name]
         key = (character_id, name)
@@ -225,6 +229,7 @@ class CharacterAnimations:
         # 이펙트 공간이 넓은 시트에서도 캐릭터의 크기와 첫 프레임의 발 위치를 유지한다.
         shift_x = (clip.width - layout.image_width) / 2 - clip.x_padding
         shift_y = (clip.height - layout.image_height) / 2
-        image.clip_composite_draw(left, bottom, texture_width, texture_height, 0, "h" if mirrored else "",
-                                  base_x + piece.facing * shift_x * scale, base_y + shift_y * scale,
-                                  clip.width * scale, clip.height * scale)
+        with damage_tint(image, tint_channel):
+            image.clip_composite_draw(left, bottom, texture_width, texture_height, 0, "h" if mirrored else "",
+                                      base_x + piece.facing * shift_x * scale, base_y + shift_y * scale,
+                                      clip.width * scale, clip.height * scale)
