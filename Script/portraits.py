@@ -12,10 +12,11 @@ class SpriteLayout:
     image_height: int
     left: int
     right: int
+    top: int
     bottom: int
 
-    def placement(self, x, foot_y, width, mirrored=False):
-        scale = width / (self.right - self.left)
+    def placement(self, x, foot_y, height, mirrored=False):
+        scale = height / (self.bottom - self.top)
         offset_x = (self.image_width - self.left - self.right) * scale / 2
         offset_y = (self.bottom - self.image_height / 2) * scale
         return (x - offset_x if mirrored else x + offset_x, foot_y + offset_y,
@@ -38,7 +39,7 @@ def load_portrait(path):
         raise OSError(f"초상화를 RGBA로 변환할 수 없습니다: {path}")
     try:
         data = surface.contents
-        left, right, bottom = data.w, 0, 0
+        left, right, top, bottom = data.w, 0, data.h, 0
         if pico2d.SDL_LockSurface(surface) < 0:
             raise OSError(f"초상화의 픽셀을 읽을 수 없습니다: {path}")
         try:
@@ -49,15 +50,16 @@ def load_portrait(path):
                 if last:
                     left = min(left, data.w - len(alpha.lstrip(b"\0")))
                     right = max(right, last)
+                    top = min(top, row)
                     bottom = row + 1
         finally:
             pico2d.SDL_UnlockSurface(surface)
         if not bottom:
-            left, right, bottom = 0, data.w, data.h
+            left, right, top, bottom = 0, data.w, 0, data.h
         texture = pico2d.SDL_CreateTextureFromSurface(pico2d.renderer, surface)
         if not texture:
             raise OSError(f"초상화 텍스처를 만들 수 없습니다: {path}")
-        return pico2d.Image(texture), SpriteLayout(data.w, data.h, left, right, bottom)
+        return pico2d.Image(texture), SpriteLayout(data.w, data.h, left, right, top, bottom)
     finally:
         pico2d.SDL_FreeSurface(surface)
 

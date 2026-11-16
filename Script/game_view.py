@@ -50,7 +50,7 @@ class GameView(BattleView):
             self.update_combat(battle)
             if self.combat_animating(battle) or self.initiative_revealing(battle) or self.card_revealing(battle):
                 return
-            if battle.redraw_pending:
+            if battle.redraw_pending and not battle.card_target_pending:
                 battle.resolve_redraw()
             elif self.controller.ai is not None:
                 self.controller.ai.update(battle, monotonic())
@@ -85,9 +85,6 @@ class GameView(BattleView):
             if self.action_panel_progress(battle) < 1:
                 return
             cell = self.cell_at_pixel(x, screen_y)
-            if self.hit(self.pass_button, x, screen_y):
-                battle.skip_turn()
-                return
             if battle.action_mode is None:
                 if self.hit(self.attack_button, x, screen_y):
                     battle.open_attack()

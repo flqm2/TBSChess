@@ -258,7 +258,7 @@ class Prototype:
             return
         suit = self._revival_cards.pop(self.current.identifier, None)
         self.card_draw = CardDraw(suit if suit is not None else choice(tuple(Suit)))
-        self.message = f"{self.current.identifier} 카드술사 · {self.card_draw.suit.label} A"
+        self.message = f"{self.current.identifier} {self.current.name} · {self.card_draw.suit.label} A"
 
     def _request_card_target(self) -> None:
         self.card_target_pending = True
@@ -527,11 +527,6 @@ class Prototype:
         piece.position = destination
         self._finish_action(f"이동 {self.cell_name(old)} → {self.cell_name(destination)}")
         return True
-
-    def skip_turn(self) -> None:
-        if (not self.is_over and self.pending_skill is None
-                and not self.redraw_pending and self.revival_pending is None):
-            self._finish_action("턴 넘김")
 
     @staticmethod
     def cell_name(cell: tuple[int, int]) -> str:

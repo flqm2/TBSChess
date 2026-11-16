@@ -33,6 +33,7 @@ ROW_COLUMNS = tuple(
 ROWS = tuple((CANVAS_HEIGHT - bottom, CANVAS_HEIGHT - top)
              for top, bottom in zip(TILE_ROW_EDGES, TILE_ROW_EDGES[1:]))
 PIECE_FOOT_INSET = 22
+PIECE_HEIGHT = 160
 
 
 class BattleView:
@@ -41,7 +42,6 @@ class BattleView:
     action_panel = (460, 89, 1726, 228)
     attack_button = (460, 89, 1084, 228)
     move_button = (1102, 89, 1726, 228)
-    pass_button = (1528, 24, 1726, 64)
     action_back_button = (1498, 89, 1726, 228)
     menu_card = (1008, 159, 52, 73)
     passive_icon = (228, 91, 344, 123)
@@ -407,19 +407,18 @@ class BattleView:
         # 앞줄 기물이 윗줄 타일까지 올라오면 앞줄을 나중에 그려 깊이를 표현한다.
         for piece in sorted(board.pieces, key=lambda piece: piece.position[1]):
             x, _ = self.cell_center(piece.position)
-            left, bottom, right, _ = self.cell_bounds(piece.position)
-            width = right - left
+            _, bottom, _, _ = self.cell_bounds(piece.position)
             foot_y = bottom + PIECE_FOOT_INSET
             attacking = pending is not None and piece is battle.current
             shake = int(5 * sin(age * 65)) if piece.identifier in hit_ids else 0
             if battle is not None:
                 if attacking:
                     animated = self.character_animations.draw_attack(
-                        piece, x, foot_y, width, pending.animation_slot, attack_age,
+                        piece, x, foot_y, PIECE_HEIGHT, pending.animation_slot, attack_age,
                     )
                 else:
                     # 피격 시트가 없는 기물도 기존 흔들림 효과를 적용한다.
-                    animated = self.character_animations.draw(piece, x, foot_y, width, now, shake)
+                    animated = self.character_animations.draw(piece, x, foot_y, PIECE_HEIGHT, now, shake)
                 if animated:
                     continue
             if piece.current_hp == 0:
@@ -430,7 +429,7 @@ class BattleView:
                 motion = round((26 if pending.hero_skill else 18) * sin(pi * progress))
             mirrored = piece.facing < 0
             placement = self.sprite_layouts[piece.image_name].placement(
-                x + shake + piece.facing * motion, foot_y + motion // 4, width, mirrored,
+                x + shake + piece.facing * motion, foot_y + motion // 4, PIECE_HEIGHT, mirrored,
             )
             self.images[piece.image_name].composite_draw(0, "h" if mirrored else "", *placement)
         if battle is not None:
@@ -521,7 +520,6 @@ class BattleView:
                 self.label(486, 170, "이동", 26)
                 self.label(486, 131, "보드에서 표시된 칸을 클릭하세요.", 20, self.muted)
             self.draw_action_button(self.action_back_button, "뒤로가기", self.muted, 22)
-        self.draw_action_button(self.pass_button, "턴 넘김 / Space", self.muted, 16)
 
         if progress < 1:
             left, bottom, right, top = self.action_panel

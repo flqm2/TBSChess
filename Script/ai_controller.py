@@ -22,8 +22,9 @@ class NormalPolicy:
 
     def choose(self, battle: Prototype) -> AIAction:
         piece = battle.current
-        attacks = tuple((slot, skill) for slot, skill in enumerate(battle.skills)
-                        if skill.damage > 0 and battle.skill_unavailable(slot) is None)
+        available = tuple((slot, skill) for slot, skill in enumerate(battle.skills)
+                          if battle.skill_unavailable(slot) is None)
+        attacks = tuple((slot, skill) for slot, skill in available if skill.damage > 0)
         candidates = []
         for slot, skill in attacks:
             score = self.attack_score(battle, battle.board, piece, skill)
@@ -34,7 +35,10 @@ class NormalPolicy:
             return AIAction(skill_slot=slot)
 
         moves = battle.legal_moves
-        if not moves or self.risk(battle, battle.board, piece) == 0:
+        if not moves:
+            for slot, skill in available:
+                if skill.cells(battle.board, piece):
+                    return AIAction(skill_slot=slot)
             return AIAction()
 
         def move_score(cell: Cell) -> tuple[float, float, int]:
@@ -139,6 +143,11 @@ class AIController:
             return
         if not self.owns_turn(battle):
             return
+        if battle.card_target_pending:
+            targets = battle.skill_preview
+            if targets:
+                battle.choose_card_target(targets[0])
+            return
 
         turn = battle, battle.turns.round, battle.turns.index
         if turn != self._turn:
@@ -154,9 +163,6 @@ class AIController:
         if now < self._ready_at:
             return
         if self._action.skill_slot is not None:
-            if battle.click_skill(self._action.skill_slot):
-                return
+            battle.click_skill(self._action.skill_slot)
         elif self._action.destination is not None:
-            if battle.try_move(self._action.destination):
-                return
-        battle.skip_turn()
+            battle.try_move(self._action.destination)

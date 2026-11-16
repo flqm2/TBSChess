@@ -47,13 +47,7 @@ def handle_event(event, game: GameController, view: GameView) -> bool:
     if event.type == pico2d.SDL_KEYDOWN:
         if event.key == pico2d.SDLK_ESCAPE:
             return False
-        if (event.key == pico2d.SDLK_SPACE and game.stage is Stage.MOVEMENT
-                and not view.ai_turn
-                and not view.initiative_revealing(game.battle)
-                and not view.card_revealing(game.battle)
-                and not view.combat_animating(game.battle)):
-            game.battle.skip_turn()
-        elif event.key == pico2d.SDLK_RETURN and game.stage is not Stage.MOVEMENT:
+        if event.key == pico2d.SDLK_RETURN and game.stage is not Stage.MOVEMENT:
             game.confirm()
     elif event.type == pico2d.SDL_MOUSEMOTION:
         view.point_at(event.x, event.y)

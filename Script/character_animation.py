@@ -191,23 +191,23 @@ class CharacterAnimations:
                 return "idle", int(now * clip.fps) % clip.frames
         return None
 
-    def draw(self, piece, x: int, foot_y: int, width: int, now: float, shake: int = 0) -> bool:
+    def draw(self, piece, x: int, foot_y: int, height: int, now: float, shake: int = 0) -> bool:
         pose = self.frame(piece, now)
         if pose is None:
             return False
-        self._draw_frame(*pose, piece, x + (shake if pose[0] == "idle" else 0), foot_y, width)
+        self._draw_frame(*pose, piece, x + (shake if pose[0] == "idle" else 0), foot_y, height)
         return True
 
-    def draw_attack(self, piece, x: int, foot_y: int, width: int, slot: int, elapsed: float) -> bool:
+    def draw_attack(self, piece, x: int, foot_y: int, height: int, slot: int, elapsed: float) -> bool:
         name = attack_clip(piece.character_id, slot)
         clip = CLIPS.get(piece.character_id, {}).get(name)
         if clip is None:
             return False
         frame = min(clip.frames - 1, int(elapsed * clip.fps))
-        self._draw_frame(name, frame, piece, x, foot_y, width)
+        self._draw_frame(name, frame, piece, x, foot_y, height)
         return True
 
-    def _draw_frame(self, name: str, frame: int, piece, x: int, foot_y: int, width: int) -> None:
+    def _draw_frame(self, name: str, frame: int, piece, x: int, foot_y: int, height: int) -> None:
         character_id = piece.character_id
         clip = CLIPS[character_id][name]
         key = (character_id, name)
@@ -220,8 +220,8 @@ class CharacterAnimations:
         bottom = image.h - (row + 1) * texture_height
         mirrored = piece.facing < 0
         layout = self.layouts[piece.image_name]
-        base_x, base_y, base_width, _ = layout.placement(x, foot_y, width, mirrored)
-        scale = base_width / layout.image_width
+        base_x, base_y, _, base_height = layout.placement(x, foot_y, height, mirrored)
+        scale = base_height / layout.image_height
         # 이펙트 공간이 넓은 시트에서도 캐릭터의 크기와 첫 프레임의 발 위치를 유지한다.
         shift_x = (clip.width - layout.image_width) / 2 - clip.x_padding
         shift_y = (clip.height - layout.image_height) / 2

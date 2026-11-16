@@ -25,6 +25,6 @@ CHARACTERS = (
     CharacterDefinition("archer", "아처", Job.RANGED, "Archer/base.png", 130),
     CharacterDefinition("mage", "메이지", Job.RANGED, "Mage/base.png", 150),
     CharacterDefinition("assassin", "암살자", Job.JOKER, "Assassin/base.png", 100),
-    CharacterDefinition("cardmaster", "카드술사", Job.JOKER, "Cardmaster/base.png", 130),
+    CharacterDefinition("cardmaster", "겜블러", Job.JOKER, "Cardmaster/base.png", 130),
 )
 CHARACTER_BY_ID = {character.identifier: character for character in CHARACTERS}

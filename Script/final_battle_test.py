@@ -15,12 +15,17 @@ def make_game(sudden_death: bool = False) -> GameController:
     game.start_battle((blue, red))
     if sudden_death:
         battle = game.battle
+        routes = {Team.BLUE: ((3, 1), (2, 0)), Team.RED: ((5, 2), (6, 3))}
         while battle.final_battle.round < 5:
-            battle.skip_turn()
+            piece = battle.current
+            start, alternate = routes[piece.team]
+            destination = alternate if piece.position == start else start
+            if not battle.try_move(destination):
+                raise RuntimeError(battle.message)
         blue.current_hp = red.current_hp = 10
         battle.combat_notices.clear()
         battle.history.clear()
-        battle.message = "서든데스 테스트 · 두 기물이 턴을 넘기면 다음 라운드에서 발동합니다."
+        battle.message = "서든데스 테스트 · 두 기물이 이동 또는 스킬을 사용하면 다음 라운드에서 발동합니다."
     return game
 
 

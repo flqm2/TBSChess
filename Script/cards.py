@@ -1,4 +1,4 @@
-"""카드술사의 네 문양과 카드 던지기 효과."""
+"""겜블러의 네 문양과 카드 던지기 효과."""
 
 from dataclasses import dataclass
 from enum import Enum
