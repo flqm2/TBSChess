@@ -21,7 +21,7 @@ SHEET_NAMES = {
 
 
 class AnimationTestView(BattleView):
-    controls = ("스킬 1", "스킬 2", "영웅 스킬", "기절", "기절 해제", "초기화")
+    controls = ("스킬 1", "스킬 2", "영웅 스킬", "기절", "기절 해제", "사망", "초기화")
 
     def __init__(self):
         super().__init__()
@@ -66,6 +66,14 @@ class AnimationTestView(BattleView):
             self.status = "기절 해제"
             self._sync_combat(self.game, monotonic())
 
+    def apply_death(self) -> None:
+        self.reset()
+        hit = Hit(self.subject.identifier, self.subject.position, self.subject.current_hp)
+        self.subject.current_hp = 0
+        self.game.last_cast = SkillCast((self.subject.position,), (hit,))
+        self.status = "사망"
+        self._sync_combat(self.game, monotonic())
+
     def choose_card_target(self) -> None:
         if self.game.card_target_pending:
             self.game.choose_card_target(self.game.skill_preview[0])
@@ -77,9 +85,10 @@ class AnimationTestView(BattleView):
             self.choose_card_target()
 
     @staticmethod
-    def button_bounds(index, bottom, top):
-        left = 96 + index * 290
-        return left, bottom, left + 278, top
+    def button_bounds(index, bottom, top, columns=6):
+        step = 1740 // columns
+        left = 96 + index * step
+        return left, bottom, left + step - 12, top
 
     def click(self, x, screen_y) -> None:
         y = self.height - 1 - screen_y
@@ -91,9 +100,9 @@ class AnimationTestView(BattleView):
                 return
 
         actions = (lambda: self.play_skill(0), lambda: self.play_skill(1), lambda: self.play_skill(2),
-                   self.apply_stun, self.release_stun, self.reset)
+                   self.apply_stun, self.release_stun, self.apply_death, self.reset)
         for index, action in enumerate(actions):
-            left, bottom, right, top = self.button_bounds(index, 70, 153)
+            left, bottom, right, top = self.button_bounds(index, 70, 153, len(self.controls))
             if left <= x <= right and bottom <= y <= top:
                 action()
                 return
@@ -138,8 +147,9 @@ class AnimationTestView(BattleView):
         self.label(305, 202, status, 22, self.text)
         for index, title in enumerate(self.controls):
             enabled = index != 4 or self.subject.stunned
-            self.draw_action_button(self.button_bounds(index, 70, 153), title,
-                                    self.accent if index in (3, 4) else self.blue, 26, enabled)
+            bounds = self.button_bounds(index, 70, 153, len(self.controls))
+            self.draw_action_button(bounds, title, self.accent if index in (3, 4, 5) else self.blue,
+                                    26, enabled)
         self.label(96, 32, "기절은 해제 버튼을 누를 때까지 유지됩니다.", 18, self.muted)
         if self.game.redraw_pending and self.card_revealing(self.game):
             self.draw_card_reveal()
