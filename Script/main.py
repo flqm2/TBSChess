@@ -1,6 +1,7 @@
 """실행 진입점. 기존 Python에 설치된 pico2d로 실행한다."""
 
 import sys
+from argparse import ArgumentParser
 from ctypes import byref
 
 # 실행 중 검증·캐시 파일을 프로젝트에 남기지 않는다.
@@ -8,6 +9,7 @@ sys.dont_write_bytecode = True
 
 from pico2d import pico2d
 
+from animation_test import AnimationTestView
 from game_controller import GameController, Stage
 from game_view import GameView
 
@@ -54,21 +56,25 @@ def handle_event(event, game: GameController, view: GameView) -> bool:
     return True
 
 
-def main(game: GameController | None = None) -> None:
+def main(game: GameController | None = None, *, animation_test: bool = False) -> None:
     pico2d.SDL_SetHint(pico2d.SDL_HINT_RENDER_SCALE_QUALITY, b"1")
     pico2d.SDL_SetHint(pico2d.SDL_HINT_RENDER_LINE_METHOD, b"3")
     pico2d.open_canvas(GameView.width, GameView.height, sync=True)
     view = None
     try:
         fit_canvas(GameView.width, GameView.height)
-        if game is None:
-            game = GameController()
-        view = GameView(game)
+        if animation_test:
+            pico2d.SDL_SetWindowTitle(pico2d.window, "전투 애니메이션 테스트".encode("utf-8"))
+            view = AnimationTestView()
+        else:
+            view = GameView(game if game is not None else GameController())
+            game = view.controller
         running = True
         while running:
             view.update()
             for event in pico2d.get_events():
-                if not handle_event(event, game, view):
+                keep_running = view.handle_event(event) if animation_test else handle_event(event, game, view)
+                if not keep_running:
                     running = False
                     break
             if running:
@@ -88,4 +94,6 @@ def main(game: GameController | None = None) -> None:
 
 
 if __name__ == "__main__":
-    main()
+    parser = ArgumentParser(description="TBSChess 전투 애니메이션 테스트")
+    parser.add_argument("--game", action="store_true", help="편성·배치 화면에서 전투를 시작합니다.")
+    main(animation_test=not parser.parse_args().game)

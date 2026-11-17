@@ -146,6 +146,14 @@ def attack_duration(character_id: str, slot: int) -> float:
     return 0.48 if slot == 2 else 0.32
 
 
+def attack_frame(character_id: str, slot: int, elapsed: float) -> tuple[str, int] | None:
+    name = attack_clip(character_id, slot)
+    clip = CLIPS.get(character_id, {}).get(name)
+    if clip is None:
+        return None
+    return name, min(clip.frames - 1, int(elapsed * clip.fps))
+
+
 class CharacterAnimations:
     def __init__(self, resource_dir, layouts):
         self.layouts = layouts
@@ -268,12 +276,10 @@ class CharacterAnimations:
         return True
 
     def draw_attack(self, piece, x: int, foot_y: int, height: int, slot: int, elapsed: float) -> bool:
-        name = attack_clip(piece.character_id, slot)
-        clip = CLIPS.get(piece.character_id, {}).get(name)
-        if clip is None:
+        pose = attack_frame(piece.character_id, slot, elapsed)
+        if pose is None:
             return False
-        frame = min(clip.frames - 1, int(elapsed * clip.fps))
-        self._draw_frame(name, frame, piece, x, foot_y, height)
+        self._draw_frame(*pose, piece, x, foot_y, height)
         return True
 
     def _draw_frame(self, name: str, frame: int, piece, x: int, foot_y: int, height: int,
