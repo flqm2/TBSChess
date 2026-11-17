@@ -33,8 +33,6 @@ class Clip:
 
 HIT = Clip(5, 12)
 IDLE = Clip(5, 6)
-HIT_NATIVE = Clip(5, 12, 96, 96, pixel_scale=1)
-IDLE_NATIVE = Clip(5, 6, 96, 96, pixel_scale=1)
 CLIPS = {
     "warrior": {
         "idle": IDLE, "active": Clip(9, 14), "hero": Clip(21, 14, 1280, 1280, 160),
@@ -48,8 +46,7 @@ CLIPS = {
     "archer": {
         "idle": IDLE, "skill1": Clip(9, 14, 1280, 1280, 160),
         "skill2": Clip(9, 14, 1280, 1280, 160), "hero": Clip(17, 14, 1600, 1600, 320),
-        "hit": HIT_NATIVE, "stun": Clip(9, 10, 96, 96, pixel_scale=1),
-        "death": Clip(13, 10, 96, 96, pixel_scale=1),
+        "hit": HIT, "stun": Clip(9, 10), "death": Clip(13, 10),
     },
     "mage": {
         "idle": IDLE, "active": Clip(13, 14), "hero": Clip(21, 14, 160, 160, 32, pixel_scale=1),
@@ -61,12 +58,9 @@ CLIPS = {
         "hit": HIT, "stun": Clip(9, 10), "death": Clip(12, 10),
     },
     "assassin": {
-        "idle": IDLE_NATIVE, "idle_empowered": IDLE_NATIVE,
-        "skill1": Clip(12, 14, 96, 96, pixel_scale=1),
-        "skill2": Clip(17, 14, 96, 96, pixel_scale=1),
-        "hero": Clip(17, 14, 96, 96, pixel_scale=1),
-        "hit": HIT_NATIVE, "stun": Clip(13, 10, 96, 96, pixel_scale=1),
-        "death": Clip(12, 10, 96, 96, pixel_scale=1),
+        "idle": IDLE, "idle_empowered": IDLE,
+        "skill1": Clip(12, 14), "skill2": Clip(17, 14), "hero": Clip(17, 14),
+        "hit": HIT, "stun": Clip(13, 10), "death": Clip(12, 10),
     },
 }
 
