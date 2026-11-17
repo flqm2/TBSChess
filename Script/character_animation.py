@@ -10,7 +10,7 @@ from portraits import damage_tint
 
 
 # 원본 픽셀의 2배 해상도로 텍스처를 올려 큰 시트도 작은 렌더러에서 재생한다.
-TEXTURE_DIVISOR = 5
+BASE_FRAME_SIZE = 96
 
 
 @dataclass(frozen=True)
@@ -20,7 +20,7 @@ class Clip:
     width: int = 960
     height: int = 960
     x_padding: int = 0
-    stun_loop: tuple[int, int] | None = None
+    pixel_scale: int = 10
 
     @property
     def duration(self) -> float:
@@ -28,39 +28,64 @@ class Clip:
 
     @property
     def texture_size(self) -> tuple[int, int]:
-        return self.width // TEXTURE_DIVISOR, self.height // TEXTURE_DIVISOR
-
-    def held_frame(self, frame: int) -> int:
-        start, end = self.stun_loop
-        return start + (frame - start) % (end - start)
+        return self.width * 2 // self.pixel_scale, self.height * 2 // self.pixel_scale
 
 
 HIT = Clip(5, 12)
 IDLE = Clip(5, 6)
+HIT_NATIVE = Clip(5, 12, 96, 96, pixel_scale=1)
+IDLE_NATIVE = Clip(5, 6, 96, 96, pixel_scale=1)
 CLIPS = {
     "warrior": {
         "idle": IDLE, "active": Clip(9, 14), "hero": Clip(21, 14, 1280, 1280, 160),
-        "hit": HIT, "stun": Clip(9, 10, stun_loop=(3, 8)), "death": Clip(12, 10),
+        "hit": HIT, "stun": Clip(9, 10), "death": Clip(12, 10),
     },
     "slayer": {
         "idle": IDLE, "skill1": Clip(9, 14), "skill2": Clip(9, 14, 1440, 960, 110),
         "hero": Clip(21, 14, 1600, 1600, 320), "passive": Clip(13, 14),
-        "hit": HIT, "stun": Clip(9, 10, stun_loop=(5, 9)), "death": Clip(13, 10),
+        "hit": HIT, "stun": Clip(9, 10), "death": Clip(13, 10),
     },
     "archer": {
         "idle": IDLE, "skill1": Clip(9, 14, 1280, 1280, 160),
         "skill2": Clip(9, 14, 1280, 1280, 160), "hero": Clip(17, 14, 1600, 1600, 320),
+        "hit": HIT_NATIVE, "stun": Clip(9, 10, 96, 96, pixel_scale=1),
+        "death": Clip(13, 10, 96, 96, pixel_scale=1),
     },
     "mage": {
-        "idle": IDLE, "active": Clip(13, 14), "hero": Clip(21, 14), "hit": HIT,
-        "stun": Clip(9, 10, stun_loop=(3, 9)), "death": Clip(10, 10),
+        "idle": IDLE, "active": Clip(13, 14), "hero": Clip(21, 14, 160, 160, 32, pixel_scale=1),
+        "hit": HIT, "stun": Clip(9, 10), "death": Clip(10, 10),
     },
     "cardmaster": {
         "idle": Clip(9, 6), "skill1": Clip(13, 14, 1280, 960),
         "skill2": Clip(13, 14, 1280, 960), "hero": Clip(17, 14, 1600, 1600, 320),
-        "passive": Clip(12, 12), "hit": HIT, "stun": Clip(9, 10, stun_loop=(6, 9)),
-        "death": Clip(12, 10),
+        "hit": HIT, "stun": Clip(9, 10), "death": Clip(12, 10),
     },
+    "assassin": {
+        "idle": IDLE_NATIVE, "idle_empowered": IDLE_NATIVE,
+        "skill1": Clip(12, 14, 96, 96, pixel_scale=1),
+        "skill2": Clip(17, 14, 96, 96, pixel_scale=1),
+        "hero": Clip(17, 14, 96, 96, pixel_scale=1),
+        "hit": HIT_NATIVE, "stun": Clip(13, 10, 96, 96, pixel_scale=1),
+        "death": Clip(12, 10, 96, 96, pixel_scale=1),
+    },
+}
+
+
+@dataclass(frozen=True)
+class StunMotion:
+    loop: range
+    recovery_clip: str
+    recovery_frames: tuple[int, ...]
+
+
+# 시트의 프레임 번호를 0부터 시작하는 인덱스로 변환해 기록한다.
+STUN_MOTIONS = {
+    "cardmaster": StunMotion(range(7, 9), "stun", (2, 1, 0)),
+    "mage": StunMotion(range(4, 9), "stun", (2, 1, 0)),
+    "slayer": StunMotion(range(6, 9), "hit", (3, 2, 1, 0)),
+    "archer": StunMotion(range(3, 6), "stun", (6, 7, 8, 2, 1, 0)),
+    "assassin": StunMotion(range(7, 10), "stun", (6, 5, 4, 3, 2, 1, 0)),
+    "warrior": StunMotion(range(3, 6), "stun", (6, 7, 8)),
 }
 
 
@@ -69,6 +94,11 @@ class Reaction:
     name: str
     clip: Clip
     started: float
+    frames: range | tuple[int, ...]
+
+    @property
+    def ended(self) -> float:
+        return self.started + len(self.frames) / self.clip.fps
 
 
 def load_sheet(path, clip: Clip):
@@ -127,70 +157,106 @@ class CharacterAnimations:
         self._battle = None
         self._cast = None
         self._playing: dict[str, tuple[Reaction, ...]] = {}
+        self._holding_stun: dict[str, Reaction] = {}
+        self._spent_empowered_idle: set[str] = set()
 
     def sync(self, battle, now: float) -> None:
         if self._battle is not battle:
             self._battle = battle
             self._cast = None
             self._playing.clear()
+            self._holding_stun.clear()
+            self._spent_empowered_idle.clear()
 
         cast = battle.last_cast
-        if cast is self._cast:
-            return
+        new_cast = cast if cast is not self._cast else None
         self._cast = cast
-        if cast is None:
-            return
+        pending = battle.pending_skill
+        if pending is not None and battle.current.character_id == "assassin":
+            identifier = battle.current.identifier
+            if pending.hero_skill:
+                self._spent_empowered_idle.discard(identifier)
+            else:
+                self._spent_empowered_idle.add(identifier)
 
         for piece in battle.board.pieces:
-            clips = CLIPS.get(piece.character_id, {})
-            names = []
-            if cast.caster_id == piece.identifier and cast.follow_up_slot is not None:
-                names.append(attack_clip(piece.character_id, cast.follow_up_slot))
-            hits = tuple(hit for hit in cast.hits if hit.piece_id == piece.identifier)
-            if hits:
-                if piece.current_hp == 0:
-                    names.append("death")
-                else:
-                    stunned = any(hit.stun_applied for hit in hits)
-                    if not (stunned and "stun" in clips) and any(hit.damage > 0 for hit in hits):
-                        names.append("hit")
-                    if any(hit.passive_triggered for hit in hits):
-                        names.append("passive")
-                    if stunned:
-                        names.append("stun")
-            reactions = []
-            started = now
-            for name in names:
-                if name in clips:
-                    clip = clips[name]
-                    reactions.append(Reaction(name, clip, started))
-                    started += clip.duration
-            if reactions:
-                self._playing[piece.identifier] = tuple(reactions)
+            if new_cast is not None:
+                self._play_cast(piece, new_cast, now)
+            held = self._holding_stun.get(piece.identifier)
+            if piece.current_hp == 0:
+                self._holding_stun.pop(piece.identifier, None)
+            elif held is None and piece.stunned:
+                self._start_stun(piece, now)
+            elif held is not None and not piece.stunned:
+                motion = STUN_MOTIONS[piece.character_id]
+                queue = self._playing[piece.identifier]
+                started = max(now, queue[-1].ended, held.ended)
+                recovery = Reaction(motion.recovery_clip, CLIPS[piece.character_id][motion.recovery_clip],
+                                    started, motion.recovery_frames)
+                self._playing[piece.identifier] = (*queue, recovery)
+                del self._holding_stun[piece.identifier]
+
+    def _play_cast(self, piece, cast, now: float) -> None:
+        clips = CLIPS.get(piece.character_id, {})
+        names = []
+        if cast.caster_id == piece.identifier and cast.follow_up_slot is not None:
+            names.append(attack_clip(piece.character_id, cast.follow_up_slot))
+        hits = tuple(hit for hit in cast.hits if hit.piece_id == piece.identifier)
+        stunned = piece.current_hp > 0 and any(hit.stun_applied for hit in hits)
+        if hits:
+            if piece.current_hp == 0:
+                names.append("death")
+            else:
+                if not stunned and piece.identifier not in self._holding_stun and any(hit.damage > 0 for hit in hits):
+                    names.append("hit")
+                if any(hit.passive_triggered for hit in hits):
+                    names.append("passive")
+        reactions = []
+        started = now
+        for name in names:
+            if name in clips:
+                clip = clips[name]
+                reaction = Reaction(name, clip, started, range(clip.frames))
+                reactions.append(reaction)
+                started = reaction.ended
+        if reactions:
+            self._playing[piece.identifier] = tuple(reactions)
+        if stunned:
+            self._start_stun(piece, started)
+
+    def _start_stun(self, piece, now: float) -> None:
+        motion = STUN_MOTIONS.get(piece.character_id)
+        if motion is None:
+            return
+        # 같은 행동에서 차례를 건너뛰더라도 초기 피격과 반복 구간을 한 번 보여 준다.
+        clip = CLIPS[piece.character_id]["stun"]
+        reaction = Reaction("stun", clip, now, range(motion.loop.stop))
+        queue = self._playing.get(piece.identifier, ())
+        self._playing[piece.identifier] = (*(r for r in queue if r.ended <= now), reaction)
+        self._holding_stun[piece.identifier] = reaction
 
     def playing_one_shot(self, now: float) -> bool:
-        return any(now < reactions[-1].started + reactions[-1].clip.duration
-                   for reactions in self._playing.values())
+        return any(now < reactions[-1].ended for reactions in self._playing.values())
 
     def frame(self, piece, now: float) -> tuple[str, int] | None:
         clips = CLIPS.get(piece.character_id, {})
-        stun_started = 0.0
         for reaction in self._playing.get(piece.identifier, ()):
-            if reaction.name == "stun":
-                stun_started = reaction.started
-            if now < reaction.started + reaction.clip.duration:
-                clip = reaction.clip
-                frame = min(clip.frames - 1, int((now - reaction.started) * clip.fps))
-                if piece.stunned and clip.stun_loop and frame >= clip.stun_loop[1]:
-                    frame = clip.held_frame(frame)
-                return reaction.name, frame
+            if reaction.started <= now < reaction.ended:
+                index = min(len(reaction.frames) - 1, int((now - reaction.started) * reaction.clip.fps))
+                return reaction.name, reaction.frames[index]
         if piece.current_hp > 0:
-            if piece.stunned and "stun" in clips:
-                clip = clips["stun"]
-                return "stun", clip.held_frame(int((now - stun_started) * clip.fps))
+            held = self._holding_stun.get(piece.identifier)
+            if held is not None:
+                loop = STUN_MOTIONS[piece.character_id].loop
+                index = max(0, int((now - held.ended) * held.clip.fps))
+                return "stun", loop[index % len(loop)]
             if "idle" in clips:
-                clip = clips["idle"]
-                return "idle", int(now * clip.fps) % clip.frames
+                name = "idle"
+                if ("idle_empowered" in clips and piece.empowered_mark
+                        and piece.identifier not in self._spent_empowered_idle):
+                    name = "idle_empowered"
+                clip = clips[name]
+                return name, int(now * clip.fps) % clip.frames
         return None
 
     def draw(self, piece, x: int, foot_y: int, height: int, now: float,
@@ -225,10 +291,11 @@ class CharacterAnimations:
         mirrored = piece.facing < 0
         layout = self.layouts[piece.image_name]
         base_x, base_y, _, base_height = layout.placement(x, foot_y, height, mirrored)
-        scale = base_height / layout.image_height
+        source_ratio = clip.pixel_scale * BASE_FRAME_SIZE / layout.image_width
+        scale = base_height / (layout.image_height * source_ratio)
         # 이펙트 공간이 넓은 시트에서도 캐릭터의 크기와 첫 프레임의 발 위치를 유지한다.
-        shift_x = (clip.width - layout.image_width) / 2 - clip.x_padding
-        shift_y = (clip.height - layout.image_height) / 2
+        shift_x = (clip.width - layout.image_width * source_ratio) / 2 - clip.x_padding
+        shift_y = (clip.height - layout.image_height * source_ratio) / 2
         with damage_tint(image, tint_channel):
             image.clip_composite_draw(left, bottom, texture_width, texture_height, 0, "h" if mirrored else "",
                                       base_x + piece.facing * shift_x * scale, base_y + shift_y * scale,
