@@ -1,5 +1,11 @@
 """배치된 기물의 이동·액티브 스킬·턴 진행."""
 
+if __name__ == "__main__":
+    import sys
+
+    sys.dont_write_bytecode = True
+    sys.modules["prototype"] = sys.modules[__name__]
+
 from collections import deque
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -532,4 +538,10 @@ class Prototype:
     @staticmethod
     def cell_name(cell: tuple[int, int]) -> str:
         return f"{chr(ord('A') + cell[0])}{cell[1] + 1}"
+
+
+if __name__ == "__main__":
+    from main import main
+
+    main(animation_test=True)
 

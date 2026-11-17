@@ -1,7 +1,6 @@
 """실행 진입점. 기존 Python에 설치된 pico2d로 실행한다."""
 
 import sys
-from argparse import ArgumentParser
 from ctypes import byref
 
 # 실행 중 검증·캐시 파일을 프로젝트에 남기지 않는다.
@@ -94,6 +93,4 @@ def main(game: GameController | None = None, *, animation_test: bool = False) ->
 
 
 if __name__ == "__main__":
-    parser = ArgumentParser(description="TBSChess 전투 애니메이션 테스트")
-    parser.add_argument("--game", action="store_true", help="편성·배치 화면에서 전투를 시작합니다.")
-    main(animation_test=not parser.parse_args().game)
+    main()

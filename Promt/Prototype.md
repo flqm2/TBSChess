@@ -30,7 +30,7 @@
 기존 Python 3.11에 설치된 pico2d 1.5.1을 사용한다. `.venv` 생성·활성화나 라이브러리 재설치는 필요 없다. 저장소 루트에서 실행한다.
 
 ```powershell
-python Script/main.py
+python Script/prototype.py
 ```
 
 어느 작업 디렉터리에서 실행해도 리소스는 소스 파일의 절대 위치를 기준으로 읽는다. 한국어 표시는 Windows의 맑은 고딕을 사용한다.
@@ -41,7 +41,7 @@ python Script/main.py
 
 ## 실제 전투 실행과 조작
 
-`python Script/main.py --game`으로 편성·배치에서 시작한다.
+`python Script/main.py`로 편성·배치에서 시작한다.
 
 - 선택 화면 왼쪽 클릭: 캐릭터 선택·해제. 4기 선택 후 ‘배치하기’ 또는 Enter.
 - 배치 화면 왼쪽 클릭: 상단 기물/배치된 기물 선택, A~D열 빈 칸에 배치·재배치. ‘캐릭터 선택으로’는 편성을 유지하며 배치 위치를 초기화한다.
