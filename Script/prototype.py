@@ -38,7 +38,6 @@ class SkillCast:
     cells: tuple[Cell, ...]
     hits: tuple[Hit, ...]
     caster_id: str | None = None
-    follow_up_slot: int | None = None
 
 
 @dataclass(frozen=True)
@@ -67,6 +66,7 @@ class Prototype:
         self.selected_skill: int | None = None
         self.last_cast: SkillCast | None = None
         self.pending_skill: PendingSkill | None = None
+        self._pending_impact: SkillCast | None = None
         self._animate_skills = animate_skills
         self.winner: Team | None = None
         self.drawn = False
@@ -285,8 +285,18 @@ class Prototype:
 
     def _cast(self, slot: int, skill: Skill, cells: tuple[Cell, ...]) -> None:
         self.pending_skill = PendingSkill(slot, skill, cells)
-        if not self._animate_skills or (slot == 0 and self.redraw_pending):
+        if not self._animate_skills:
             self.resolve_pending_skill()
+
+    @property
+    def pending_impact_applied(self) -> bool:
+        return self._pending_impact is not None
+
+    def apply_pending_impact(self) -> None:
+        pending = self.pending_skill
+        if self._pending_impact is None and pending is not None and pending.skill.effect is not Effect.REDRAW:
+            self._pending_impact = self._apply_skill(self.current, pending.skill, pending.cells)
+            self._record_casts([self._pending_impact], self.current.identifier)
 
     def resolve_pending_skill(self) -> None:
         pending = self.pending_skill
@@ -301,7 +311,9 @@ class Prototype:
             self.selected_skill = None
             self.message = "새 카드를 뽑습니다."
             return
-        cast = self._apply_skill(caster, skill, pending.cells)
+        impact = self._pending_impact
+        self._pending_impact = None
+        cast = impact if impact is not None else self._apply_skill(caster, skill, pending.cells)
         if pending.hero_skill:
             caster.hero_skill_round = self.turns.round
         hits = cast.hits
@@ -317,12 +329,9 @@ class Prototype:
         elif skill.effect is Effect.MAGIC_BOX:
             detail = f"상자 설치 · {detail}"
         action = skill.name
-        follow_up_slot = None
         if pending.slot == 0 and self.card_draw is not None:
             action = f"{'카드 뽑기 → ' if self.redraw_pending else ''}{self.card_draw.suit.label} 카드 던지기"
-            if self.redraw_pending and self._animate_skills:
-                follow_up_slot = pending.slot
-        self._finish_action(f"{action} · {detail}", cast, follow_up_slot=follow_up_slot)
+        self._finish_action(f"{action} · {detail}", cast if impact is None else None)
 
     def _apply_skill(self, caster: Piece, skill: Skill, cells: tuple[Cell, ...]) -> SkillCast:
         if skill.effect is Effect.EMPOWER:
@@ -453,8 +462,7 @@ class Prototype:
             self.combat_notices.append(("서든데스", "양 진영에 최대 체력의 10% 피해"))
         return order
 
-    def _finish_action(self, action: str, cast: SkillCast | None = None, *,
-                       follow_up_slot: int | None = None) -> None:
+    def _finish_action(self, action: str, cast: SkillCast | None = None) -> None:
         piece = self.current
         self.history.appendleft(f"R{self.turns.round:02}  {piece.identifier} {piece.name}  {action}")
         self.selected_skill = None
@@ -467,7 +475,7 @@ class Prototype:
         restart_round = self._enter_final_if_ready()
         self.board.refresh_facing()
         self.last_stun_skips = self._advance_turns(casts, heroes, restart_round, defer_opening=self._animate_skills)
-        self._record_casts(casts, piece.identifier if cast is not None else None, follow_up_slot)
+        self._record_casts(casts, piece.identifier if cast is not None else None)
         summary = " · ".join((action, *heroes))
         if self.is_over:
             self.card_draw = None
@@ -502,13 +510,12 @@ class Prototype:
                 break
         return tuple(stun_skips)
 
-    def _record_casts(self, casts, caster_id=None, follow_up_slot=None) -> None:
+    def _record_casts(self, casts, caster_id=None) -> None:
         if casts:
             self.last_cast = SkillCast(
                 tuple(dict.fromkeys(cell for result in casts for cell in result.cells)),
                 tuple(hit for result in casts for hit in result.hits),
                 caster_id,
-                follow_up_slot=follow_up_slot,
             )
 
     def complete_final_opening(self) -> None:

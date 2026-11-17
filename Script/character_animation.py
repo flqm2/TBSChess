@@ -23,10 +23,6 @@ class Clip:
     pixel_scale: int = 10
 
     @property
-    def duration(self) -> float:
-        return self.frames / self.fps
-
-    @property
     def texture_size(self) -> tuple[int, int]:
         return self.width * 2 // self.pixel_scale, self.height * 2 // self.pixel_scale
 
@@ -82,6 +78,17 @@ STUN_MOTIONS = {
     "warrior": StunMotion(range(3, 6), "stun", (6, 7, 8)),
 }
 
+ATTACK_SEQUENCES = {
+    ("assassin", 0): (*range(12), *range(6, -1, -1)),
+}
+IMPACT_FRAMES = {
+    ("assassin", 0): 9,
+    ("assassin", 1): 9,
+    ("slayer", 2): 13,
+    ("warrior", 2): 12,
+    ("mage", 2): 15,
+}
+
 
 @dataclass(frozen=True)
 class Reaction:
@@ -135,9 +142,18 @@ def attack_clip(character_id: str, slot: int) -> str:
 
 def attack_duration(character_id: str, slot: int) -> float:
     clip = CLIPS.get(character_id, {}).get(attack_clip(character_id, slot))
-    if clip is not None:
-        return clip.duration
-    return 0.48 if slot == 2 else 0.32
+    if clip is None:
+        return 0.48 if slot == 2 else 0.32
+    frames = ATTACK_SEQUENCES.get((character_id, slot), range(clip.frames))
+    return len(frames) / clip.fps
+
+
+def attack_impact_time(character_id: str, slot: int) -> float | None:
+    frame = IMPACT_FRAMES.get((character_id, slot))
+    if frame is None:
+        return None
+    clip = CLIPS[character_id][attack_clip(character_id, slot)]
+    return (frame - 1) / clip.fps
 
 
 def attack_frame(character_id: str, slot: int, elapsed: float) -> tuple[str, int] | None:
@@ -145,7 +161,8 @@ def attack_frame(character_id: str, slot: int, elapsed: float) -> tuple[str, int
     clip = CLIPS.get(character_id, {}).get(name)
     if clip is None:
         return None
-    return name, min(clip.frames - 1, int(elapsed * clip.fps))
+    frames = ATTACK_SEQUENCES.get((character_id, slot), range(clip.frames))
+    return name, frames[min(len(frames) - 1, int(elapsed * clip.fps + 1e-8))]
 
 
 class CharacterAnimations:
@@ -201,8 +218,6 @@ class CharacterAnimations:
     def _play_cast(self, piece, cast, now: float) -> None:
         clips = CLIPS.get(piece.character_id, {})
         names = []
-        if cast.caster_id == piece.identifier and cast.follow_up_slot is not None:
-            names.append(attack_clip(piece.character_id, cast.follow_up_slot))
         hits = tuple(hit for hit in cast.hits if hit.piece_id == piece.identifier)
         stunned = piece.current_hp > 0 and any(hit.stun_applied for hit in hits)
         if hits:

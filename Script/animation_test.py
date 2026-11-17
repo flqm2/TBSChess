@@ -75,7 +75,7 @@ class AnimationTestView(BattleView):
         self._sync_combat(self.game, monotonic())
 
     def choose_card_target(self) -> None:
-        if self.game.card_target_pending:
+        if self.game.pending_skill is None and self.game.card_target_pending:
             self.game.choose_card_target(self.game.skill_preview[0])
 
     def update(self) -> None:
@@ -137,7 +137,7 @@ class AnimationTestView(BattleView):
         status = self.status
         if self.game.pending_skill is not None:
             pose = attack_frame(self.subject.character_id, self.game.pending_skill.slot,
-                                max(0.0, now - self._attack_started))
+                                self.attack_elapsed(now))
         else:
             pose = self.character_animations.frame(self.subject, now)
         if pose is not None:

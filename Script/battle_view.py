@@ -9,7 +9,7 @@ from time import monotonic
 from pico2d import pico2d
 
 from arena_view import ArenaView
-from character_animation import CharacterAnimations, attack_duration
+from character_animation import CharacterAnimations, attack_duration, attack_impact_time
 from character_data import CHARACTERS
 from cards import Suit
 from dice_view import DiceView
@@ -87,6 +87,7 @@ class BattleView:
         self._combat_battle = None
         self._shown_attack = None
         self._attack_started = 0.0
+        self._attack_paused_at: float | None = None
         self._shown_cast = None
         self._cast_started = 0.0
         self._shown_draw = None
@@ -123,9 +124,11 @@ class BattleView:
         if battle is not self._combat_battle:
             self._combat_battle = battle
             self._shown_attack = self._shown_cast = None
+            self._attack_paused_at = None
         if battle.pending_skill is not self._shown_attack:
             self._shown_attack = battle.pending_skill
             self._attack_started = now
+            self._attack_paused_at = None
         if battle.last_cast is not self._shown_cast:
             self._shown_cast = battle.last_cast
             self._cast_started = now
@@ -136,12 +139,33 @@ class BattleView:
     def _attack_duration(battle: Prototype) -> float:
         return attack_duration(battle.current.character_id, battle.pending_skill.slot)
 
+    def attack_elapsed(self, now: float) -> float:
+        if self._attack_paused_at is not None:
+            now = self._attack_paused_at
+        return max(0.0, now - self._attack_started)
+
+    def _update_attack(self, battle: Prototype, now: float) -> None:
+        character_id = battle.current.character_id
+        impact_time = attack_impact_time(character_id, battle.pending_skill.slot)
+        if (impact_time is not None and not battle.pending_impact_applied
+                and self.attack_elapsed(now) >= impact_time):
+            battle.apply_pending_impact()
+            self._attack_started = now - impact_time
+            if character_id == "assassin":
+                self._attack_paused_at = now
+            self._sync_combat(battle, now)
+        if self._attack_paused_at is not None and not self._showing_impact(now):
+            self._attack_started += now - self._attack_paused_at
+            self._attack_paused_at = None
+        if self.attack_elapsed(now) >= self._attack_duration(battle):
+            battle.resolve_pending_skill()
+            self._sync_combat(battle, now)
+
     def update_combat(self, battle: Prototype) -> None:
         now = monotonic()
         self._sync_combat(battle, now)
-        if battle.pending_skill is not None and now - self._attack_started >= self._attack_duration(battle):
-            battle.resolve_pending_skill()
-            self._sync_combat(battle, now)
+        if battle.pending_skill is not None:
+            self._update_attack(battle, now)
         if battle.final_opening_pending and self.arena.opening_finished(now):
             battle.complete_final_opening()
             self._sync_combat(battle, now)
@@ -359,7 +383,7 @@ class BattleView:
             board = battle.board
             self._sync_combat(battle, now)
             pending = battle.pending_skill
-            attack_age = now - self._attack_started
+            attack_age = self.attack_elapsed(now)
             if not battle.is_over and not self._showing_impact(now) and not self.arena.waiting(battle, now):
                 current = battle.current
             legal = battle.legal_moves if battle.move_preview else ()
