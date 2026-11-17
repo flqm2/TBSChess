@@ -89,6 +89,7 @@ def main(game: GameController | None = None, *, animation_test: bool = False) ->
             view.card_faces.clear()
             view.card_back = None
             view.dice_view.image = None
+        view = None
         pico2d.close_canvas()
 
 

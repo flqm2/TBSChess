@@ -8,6 +8,7 @@ from time import monotonic
 
 from pico2d import pico2d
 
+from arena_view import ArenaView
 from character_animation import CharacterAnimations, attack_duration
 from character_data import CHARACTERS
 from cards import Suit
@@ -75,7 +76,7 @@ class BattleView:
             self.portraits[path] = pico2d.load_image(str(self.resource_dir / path))
         self.grayscale_portraits = {}
         self.character_animations = CharacterAnimations(self.resource_dir, self.sprite_layouts)
-        self.battlefield = pico2d.load_image(str(self.resource_dir / "battlefield.png"))
+        self.arena = ArenaView(self.resource_dir / "Arena")
         card_dir = self.resource_dir / "Cards"
         self.card_faces = {suit: pico2d.load_image(str(card_dir / f"ace_{suit.slug}.png")) for suit in Suit}
         self.card_back = pico2d.load_image(str(card_dir / "back.png"))
@@ -113,6 +114,8 @@ class BattleView:
         return self._shown_draw is not None and monotonic() - self._draw_started < self.card_reveal_seconds
 
     def initiative_revealing(self, battle: Prototype) -> bool:
+        if self.arena.waiting(battle, monotonic()):
+            return True
         final = battle.final_battle
         return self.dice_view.showing(battle.initiative, delay=0.8 if final and final.sudden_death else 0.0)
 
@@ -127,6 +130,7 @@ class BattleView:
             self._shown_cast = battle.last_cast
             self._cast_started = now
         self.character_animations.sync(battle, now)
+        self.arena.sync(battle, now, ready=battle.pending_skill is None and not self._showing_impact(now))
 
     @staticmethod
     def _attack_duration(battle: Prototype) -> float:
@@ -137,6 +141,9 @@ class BattleView:
         self._sync_combat(battle, now)
         if battle.pending_skill is not None and now - self._attack_started >= self._attack_duration(battle):
             battle.resolve_pending_skill()
+            self._sync_combat(battle, now)
+        if battle.final_opening_pending and self.arena.opening_finished(now):
+            battle.complete_final_opening()
             self._sync_combat(battle, now)
 
     def _showing_impact(self, now: float) -> bool:
@@ -212,7 +219,7 @@ class BattleView:
         return self.blue if team is Team.BLUE else self.red
 
     def draw_arena(self) -> None:
-        self.battlefield.draw(self.width // 2, self.height // 2, self.width, self.height)
+        self.arena.draw(self.game, monotonic(), self.width, self.height)
 
     def shade_arena_hud(self, header_bottom: int, footer_top: int) -> None:
         self.rectangle((0, header_bottom, self.width - 1, self.height - 1), self.background, alpha=192)
@@ -228,18 +235,19 @@ class BattleView:
     def draw(self, ai_difficulty: str | None = None) -> None:
         animating = self.combat_animating(self.game)
         pending = self.game.pending_skill
-        holding_turn = animating and pending is None
-        announcing = not animating and self.initiative_revealing(self.game)
-        revealing = not animating and not announcing and self.card_revealing(self.game)
+        opening = self.arena.waiting(self.game, monotonic())
+        holding_turn = opening or (animating and pending is None)
+        announcing = not opening and not animating and self.initiative_revealing(self.game)
+        revealing = not holding_turn and not animating and not announcing and self.card_revealing(self.game)
         self.draw_arena()
         self.shade_arena_hud(932, 240)
         self.draw_board()
-        self.draw_health_and_round(show_initiative=not animating and not announcing)
+        self.draw_health_and_round(show_initiative=not opening and not animating and not announcing)
         if not holding_turn:
             self.draw_turn_order()
         if not holding_turn:
             self.draw_details()
-        if not animating:
+        if not animating and not opening:
             if ai_difficulty is not None:
                 self.draw_ai_actions(ai_difficulty)
             else:
@@ -252,7 +260,7 @@ class BattleView:
         self.draw_action_button(self.help_button, "?", self.blue, 26)
         if announcing:
             self.dice_view.draw_announcement(self)
-        elif not animating and self.game.revival_pending is not None:
+        elif not holding_turn and not animating and self.game.revival_pending is not None:
             self.draw_revival_choices()
         elif revealing:
             self.draw_card_reveal()
@@ -352,27 +360,13 @@ class BattleView:
             self._sync_combat(battle, now)
             pending = battle.pending_skill
             attack_age = now - self._attack_started
-            current = battle.current if not battle.is_over and not self._showing_impact(now) else None
+            if not battle.is_over and not self._showing_impact(now) and not self.arena.waiting(battle, now):
+                current = battle.current
             legal = battle.legal_moves if battle.move_preview else ()
             attack = pending.cells if pending else battle.skill_preview
             age = now - self._cast_started
             if age < self.hit_feedback_seconds:
                 cast = self._shown_cast
-        if board.boundary_open:
-            # 중앙 장벽 자리에 같은 이미지의 돌 바닥을 타일 높이에 맞춰 그린다.
-            scale_x = self.battlefield.w / self.width
-            scale_y = self.battlefield.h / self.height
-            source_left = round(885 * scale_x)
-            for (bottom, top), columns in zip(ROWS, ROW_COLUMNS):
-                left, right = columns[3][1] - 2, columns[4][0] + 2
-                width, height = right - left, top - bottom
-                source_bottom = round(bottom * scale_y)
-                source_width = round((885 + width) * scale_x) - source_left
-                source_height = round(top * scale_y) - source_bottom
-                self.battlefield.clip_draw(
-                    source_left, source_bottom, source_width, source_height,
-                    (left + right) / 2, (bottom + top) / 2, width, height,
-                )
         if battle is not None:
             for warrior in board.living_pieces:
                 if warrior.character_id != "warrior":

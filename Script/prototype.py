@@ -71,6 +71,7 @@ class Prototype:
         self.winner: Team | None = None
         self.drawn = False
         self.final_battle: FinalBattleRules | None = None
+        self.final_opening_pending = False
         self.opening_initiative: InitiativeRoll | None = None
         self.card_draw: CardDraw | None = None
         self.redraw_pending = False
@@ -165,6 +166,8 @@ class Prototype:
     def skill_unavailable(self, slot: int) -> str | None:
         if self.is_over:
             return "경기 종료"
+        if self.final_opening_pending:
+            return "차단막 해제 중"
         if self.pending_skill is not None:
             return "스킬 발동 중"
         if self.revival_pending is not None:
@@ -180,7 +183,7 @@ class Prototype:
         return None
 
     def open_movement(self) -> None:
-        if (self.is_over or self.pending_skill is not None
+        if (self.is_over or self.final_opening_pending or self.pending_skill is not None
                 or self.redraw_pending or self.revival_pending is not None):
             return
         if not self.legal_moves:
@@ -192,7 +195,7 @@ class Prototype:
         self.message, self.failed = "보드에서 초록색 칸을 클릭하세요.", False
 
     def open_attack(self) -> None:
-        if (self.is_over or self.pending_skill is not None or self.revival_pending is not None
+        if (self.is_over or self.final_opening_pending or self.pending_skill is not None or self.revival_pending is not None
                 or self.action_mode is ActionMode.ATTACK):
             return
         if self.redraw_pending and not self.card_target_pending:
@@ -463,8 +466,26 @@ class Prototype:
         casts = [cast] if cast is not None else []
         restart_round = self._enter_final_if_ready()
         self.board.refresh_facing()
+        self.last_stun_skips = self._advance_turns(casts, heroes, restart_round, defer_opening=self._animate_skills)
+        self._record_casts(casts, piece.identifier if cast is not None else None, follow_up_slot)
+        summary = " · ".join((action, *heroes))
+        if self.is_over:
+            self.card_draw = None
+            result = f"{self.winner.value} 승리" if self.winner else self.result_label
+            self.message = f"{summary}. {result}."
+        elif self.final_opening_pending:
+            self.card_draw = None
+            self.message = f"{summary}. 차단막 해제 중."
+        else:
+            self.message = f"{summary}. {self.current.identifier} {self.current.name} 차례."
+            self._draw_turn_card()
+
+    def _advance_turns(self, casts, heroes, restart_round: bool, *, defer_opening: bool) -> tuple[Piece, ...]:
         stun_skips = []
         while not self.is_over:
+            if restart_round and defer_opening:
+                self.final_opening_pending = True
+                break
             next_round = (lambda: self._start_final_round(casts)) if self.final_battle else None
             for skipped in self.turns.advance(next_round, restart_round=restart_round):
                 stun_skips.append(skipped)
@@ -479,21 +500,30 @@ class Prototype:
             restart_round = self._enter_final_if_ready()
             if not restart_round and self.current.current_hp > 0:
                 break
-        self.last_stun_skips = tuple(stun_skips)
+        return tuple(stun_skips)
+
+    def _record_casts(self, casts, caster_id=None, follow_up_slot=None) -> None:
         if casts:
             self.last_cast = SkillCast(
                 tuple(dict.fromkeys(cell for result in casts for cell in result.cells)),
                 tuple(hit for result in casts for hit in result.hits),
-                piece.identifier if cast is not None else None,
+                caster_id,
                 follow_up_slot=follow_up_slot,
             )
-        summary = " · ".join((action, *heroes))
+
+    def complete_final_opening(self) -> None:
+        if not self.final_opening_pending:
+            return
+        self.final_opening_pending = False
+        casts = []
+        skipped = self._advance_turns(casts, [], True, defer_opening=False)
+        self.last_stun_skips = (*self.last_stun_skips, *skipped)
+        self._record_casts(casts)
         if self.is_over:
             self.card_draw = None
-            result = f"{self.winner.value} 승리" if self.winner else self.result_label
-            self.message = f"{summary}. {result}."
+            self.message = self.result_label
         else:
-            self.message = f"{summary}. {self.current.identifier} {self.current.name} 차례."
+            self.message = f"최종전 시작. {self.current.identifier} {self.current.name} 차례."
             self._draw_turn_card()
 
     def _update_survivors(self) -> list[str]:
@@ -521,7 +551,7 @@ class Prototype:
         return heroes
 
     def try_move(self, destination: tuple[int, int] | None) -> bool:
-        if (self.is_over or self.pending_skill is not None
+        if (self.is_over or self.final_opening_pending or self.pending_skill is not None
                 or self.redraw_pending or self.revival_pending is not None):
             return False
         piece = self.current
