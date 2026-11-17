@@ -276,6 +276,10 @@ class CharacterAnimations:
         self._draw_frame(*pose, piece, x, foot_y, height)
         return True
 
+    def draw_idle(self, piece, x: int, foot_y: int, height: int, elapsed: float) -> None:
+        clip = CLIPS[piece.character_id]["idle"]
+        self._draw_frame("idle", int(elapsed * clip.fps) % clip.frames, piece, x, foot_y, height)
+
     def _draw_frame(self, name: str, frame: int, piece, x: int, foot_y: int, height: int,
                     tint_channel: int = 255) -> None:
         character_id = piece.character_id

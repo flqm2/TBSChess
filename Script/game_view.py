@@ -20,6 +20,9 @@ class GameView(BattleView):
         super().__init__()
         self.controller = controller
         self.help_overlay: BattleHelp | None = None
+        self._selection_pieces = tuple(character.create_piece(Team.BLUE, i, (0, 0))
+                                       for i, character in enumerate(CHARACTERS, 1))
+        self._selection_started: dict[str, float] = {}
 
     @staticmethod
     def character_bounds(index):
@@ -112,6 +115,7 @@ class GameView(BattleView):
             for index, character in enumerate(CHARACTERS):
                 if self.hit(self.character_bounds(index), x, screen_y):
                     controller.select_character(character.identifier)
+                    self._selection_started.pop(character.identifier, None)
                     break
             return
         if self.hit(self.deployment_confirm_button, x, screen_y):
@@ -161,6 +165,7 @@ class GameView(BattleView):
 
     def draw_selection(self):
         selected = self.controller.roster.selected
+        now = monotonic()
         self.label(94, 962, "캐릭터 6종 중 4기 선택 · 선택 순서가 행동 순서가 됩니다", 20, self.muted)
         for index, character in enumerate(CHARACTERS):
             bounds = self.character_bounds(index)
@@ -170,7 +175,14 @@ class GameView(BattleView):
             self.rectangle(bounds, self.blue if chosen else (65, 79, 95), False)
             self.label(x + 22, y + 291, character.name, 26)
             self.label(x + 22, y + 252, f"{character.job.value}  /  {self.movement_labels[character.job]}", 18, self.muted)
-            self.portrait(character, x + 188, y + 145, 184, 180)
+            if chosen:
+                started = self._selection_started.setdefault(character.identifier, now)
+                self.character_animations.draw_idle(self._selection_pieces[index], x + 188, y + 55,
+                                                    178, now - started)
+            else:
+                image = self.grayscale_image(character.image_name)
+                layout = self.sprite_layouts[character.image_name]
+                image.draw(*layout.placement(x + 188, y + 55, 178))
             self.label(x + 22, y + 31, "선택 해제" if chosen else "클릭하여 선택", 18,
                        self.blue if chosen else self.muted)
             self.label(x + 271, y + 31, f"체력 {character.max_hp}", 18, self.text)
@@ -186,6 +198,7 @@ class GameView(BattleView):
                        self.text if character else self.muted)
             if character:
                 self.label(1380, y - 16, character.job.value, 16, self.blue)
+                self.portrait(character, 1640, y, 54, 54)
         self.button(self.roster_confirm_button, "배치하기  /  Enter", self.controller.roster.ready)
         self.label(1360, 299, "캐릭터 중복 선택 불가", 16, self.muted)
         self.label(1360, 268, "같은 직업의 다른 캐릭터 허용", 16, self.muted)

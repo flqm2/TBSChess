@@ -67,9 +67,12 @@ class BattleView:
         self.resource_dir = root / "Resource"
         self.images = {}
         self.sprite_layouts = {}
+        self.portraits = {}
         for character in CHARACTERS:
             name = character.image_name
             self.images[name], self.sprite_layouts[name] = load_portrait(self.resource_dir / name)
+            path = Path(name).with_name("portrait.png")
+            self.portraits[path] = pico2d.load_image(str(self.resource_dir / path))
         self.grayscale_portraits = {}
         self.character_animations = CharacterAnimations(self.resource_dir, self.sprite_layouts)
         self.battlefield = pico2d.load_image(str(self.resource_dir / "battlefield.png"))
@@ -191,14 +194,14 @@ class BattleView:
         pico2d.TTF_SizeUTF8(self.fonts[size].font, text.encode("utf-8"), byref(width), None)
         self.label(x - width.value // 2, y, text, size, color)
 
+    def grayscale_image(self, path):
+        if path not in self.grayscale_portraits:
+            self.grayscale_portraits[path] = load_grayscale_portrait(self.resource_dir / path)
+        return self.grayscale_portraits[path]
+
     def portrait(self, character, x, y, max_width, max_height, grayscale=False, mirrored=False):
-        name = character.image_name
-        if grayscale:
-            if name not in self.grayscale_portraits:
-                self.grayscale_portraits[name] = load_grayscale_portrait(self.resource_dir / name)
-            image = self.grayscale_portraits[name]
-        else:
-            image = self.images[name]
+        path = Path(character.image_name).with_name("portrait.png")
+        image = self.grayscale_image(path) if grayscale else self.portraits[path]
         scale = min(max_width / image.w, max_height / image.h)
         if mirrored:
             image.composite_draw(0, "h", x, y, image.w * scale, image.h * scale)
