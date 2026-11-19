@@ -56,6 +56,12 @@ class GameController:
         self.battle = Prototype(pieces, animate_skills=True)
         self.stage = Stage.MOVEMENT
 
+    def restart(self) -> bool:
+        if self.stage is not Stage.MOVEMENT or not self.battle.is_over:
+            return False
+        self.__init__(red_ai=self.ai is not None)
+        return True
+
     def back_to_selection(self) -> None:
         if self.stage is Stage.DEPLOYMENT:
             self.stage = Stage.SELECTION

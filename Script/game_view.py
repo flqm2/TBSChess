@@ -75,6 +75,15 @@ class GameView(BattleView):
                 self.hover = None
                 self.passive_hovered = False
                 return
+            if battle.is_over:
+                if self.hit(self.restart_button, x, screen_y) and controller.restart():
+                    self.game = None
+                    self.hover = None
+                    self.passive_hovered = False
+                    self._selection_started.clear()
+                    self._stack_order = self._stack_from = self._shown_stun_skips = ()
+                    self._stun_visible_until.clear()
+                return
             if battle.revival_pending is not None:
                 if self.controller.ai is not None and battle.revival_pending.team is Team.RED:
                     return
@@ -83,7 +92,7 @@ class GameView(BattleView):
                         battle.choose_revival_card(suit)
                         break
                 return
-            if battle.is_over or self.ai_turn or self.card_revealing(battle):
+            if self.ai_turn or self.card_revealing(battle):
                 return
             if self.action_panel_progress(battle) < 1:
                 return

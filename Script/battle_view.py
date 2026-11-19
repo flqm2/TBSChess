@@ -45,6 +45,7 @@ class BattleView:
     attack_button = (460, 89, 1084, 228)
     move_button = (1102, 89, 1726, 228)
     action_back_button = (1498, 89, 1726, 228)
+    restart_button = (1102, 89, 1726, 228)
     menu_card = (1008, 159, 52, 73)
     passive_icon = (228, 91, 344, 123)
     background = (19, 25, 34)
@@ -568,6 +569,7 @@ class BattleView:
 
     def draw_actions(self, revealing: bool) -> None:
         if self.game.is_over:
+            self.draw_action_button(self.restart_button, "다시 시작", self.blue, 32)
             return
         progress = self.action_panel_progress(self.game)
         mode = self.game.action_mode
