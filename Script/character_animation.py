@@ -82,6 +82,12 @@ ATTACK_SEQUENCES = {
     ("assassin", 0): (*range(12), *range(6, -1, -1)),
 }
 IMPACT_FRAMES = {
+    ("mage", 0): 11,
+    ("mage", 1): 11,
+    ("slayer", 0): 6,
+    ("slayer", 1): 6,
+    ("warrior", 0): 6,
+    ("warrior", 1): 6,
     ("assassin", 0): 9,
     ("assassin", 1): 9,
     ("slayer", 2): 13,
