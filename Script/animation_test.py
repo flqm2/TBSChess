@@ -26,6 +26,7 @@ class AnimationTestView(BattleView):
     def __init__(self):
         super().__init__()
         self.selected = CHARACTERS[0]
+        self.test_suit = Suit.SPADE
         self.reset()
 
     def reset(self, *, hero=False, empowered=False) -> None:
@@ -40,7 +41,7 @@ class AnimationTestView(BattleView):
         pieces = (self.subject, ally, *targets)
         self.game = Prototype(pieces, animate_skills=True)
         self.game.turns = TurnManager(pieces)
-        self.game.card_draw = CardDraw(Suit.SPADE) if self.selected.identifier == "cardmaster" else None
+        self.game.card_draw = CardDraw(self.test_suit) if self.selected.identifier == "cardmaster" else None
         self.status = "대기"
 
     def play_skill(self, slot: int) -> None:
@@ -90,6 +91,11 @@ class AnimationTestView(BattleView):
         left = 96 + index * step
         return left, bottom, left + step - 12, top
 
+    @staticmethod
+    def suit_bounds(index):
+        left = 510 + index * 220
+        return left, 850, left + 204, 902
+
     def click(self, x, screen_y) -> None:
         y = self.height - 1 - screen_y
         for index, character in enumerate(CHARACTERS):
@@ -98,6 +104,14 @@ class AnimationTestView(BattleView):
                 self.selected = character
                 self.reset()
                 return
+
+        if self.selected.identifier == "cardmaster":
+            for index, suit in enumerate(Suit):
+                left, bottom, right, top = self.suit_bounds(index)
+                if left <= x <= right and bottom <= y <= top:
+                    self.test_suit = suit
+                    self.reset()
+                    return
 
         actions = (lambda: self.play_skill(0), lambda: self.play_skill(1), lambda: self.play_skill(2),
                    self.apply_stun, self.release_stun, self.apply_death, self.reset)
@@ -130,6 +144,12 @@ class AnimationTestView(BattleView):
             self.rectangle(bounds, color, False)
             self.portrait(character, left + 58, (bottom + top) // 2, 74, 76)
             self.label(left + 110, (bottom + top) // 2, character.name, 26, color)
+
+        if self.selected.identifier == "cardmaster":
+            self.label(310, 877, "시작 카드", 22, self.text)
+            for index, suit in enumerate(Suit):
+                color = self.accent if suit is self.test_suit else self.blue
+                self.draw_action_button(self.suit_bounds(index), suit.label, color, 22)
 
         self.label(96, 202, self.selected.name, 26, self.accent)
         status = self.status

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from pico2d import pico2d
 
+from skills import Effect
 
 EFFECTS = {
     ("slayer", 0): "slayer_slash",
@@ -20,6 +21,7 @@ EFFECTS = {
 PER_CELL_EFFECTS = {
     "archer_straight", "archer_fall", "mage_lightning", "mage_fireball",
     "assassin_cut", "assassin_flurry",
+    "gambler_heart", "gambler_spade", "gambler_club", "gambler_diamond",
 }
 GROUND_EFFECTS = {"warrior_slam", "archer_fall", "mage_lightning", "mage_fireball"}
 FRAME_COUNT = 6
@@ -40,9 +42,19 @@ class AttackEffects:
         self.images = {}
         self.playback: Playback | None = None
 
-    def play(self, caster, pending, now: float, *, cells=None) -> None:
+    def play(self, battle, now: float, *, cells=None) -> None:
+        caster, pending = battle.current, battle.pending_skill
         name = EFFECTS.get((caster.character_id, pending.slot))
         cells = pending.cells if cells is None else cells
+        if caster.character_id == "cardmaster" and pending.slot == 0 and battle.card_draw is not None:
+            name = f"gambler_{battle.card_draw.suit.slug}"
+            if pending.skill.effect is Effect.HEAL_ALLIES:
+                cells = tuple(piece.position for piece in battle.board.living_pieces
+                              if piece.team is caster.team and piece is not caster and piece.position in cells)
+            elif pending.skill.effect is Effect.HEAL_STRIKE:
+                cells = (caster.position,)
+            elif pending.skill.effect in (Effect.SWAP, Effect.TELEPORT):
+                cells = tuple(dict.fromkeys((caster.position, *cells)))
         if name is not None and cells:
             self.playback = Playback(name, cells, caster.facing, now)
 

@@ -164,7 +164,7 @@ class BattleView:
             battle.apply_pending_impact()
             pending = battle.pending_skill
             cells = battle.last_cast.cells if pending.skill.effect is Effect.RANDOM_MARK else pending.cells
-            self.attack_effects.play(battle.current, pending, now, cells=cells)
+            self.attack_effects.play(battle, now, cells=cells)
             self._attack_started = now - impact_time
             if character_id == "assassin":
                 self._attack_paused_at = now
@@ -174,7 +174,7 @@ class BattleView:
             self._attack_paused_at = None
         if self.attack_elapsed(now) >= self._attack_duration(battle):
             if not battle.pending_impact_applied:
-                self.attack_effects.play(battle.current, battle.pending_skill, now)
+                self.attack_effects.play(battle, now)
             battle.resolve_pending_skill()
             self._sync_combat(battle, real_now)
 
