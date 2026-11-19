@@ -9,7 +9,8 @@ from time import monotonic
 from pico2d import pico2d
 
 from arena_view import ArenaView
-from character_animation import CharacterAnimations, attack_duration, attack_impact_time
+from character_animation import CLIPS, CharacterAnimations, attack_duration, attack_impact_time
+from death_presentation import DeathPresentation
 from character_data import CHARACTERS
 from cards import Suit
 from dice_view import DiceView
@@ -76,6 +77,8 @@ class BattleView:
             self.portraits[path] = pico2d.load_image(str(self.resource_dir / path))
         self.grayscale_portraits = {}
         self.character_animations = CharacterAnimations(self.resource_dir, self.sprite_layouts)
+        self.death_presentation = DeathPresentation()
+        self._scene_image = None
         self.arena = ArenaView(self.resource_dir / "Arena")
         card_dir = self.resource_dir / "Cards"
         self.card_faces = {suit: pico2d.load_image(str(card_dir / f"ace_{suit.slug}.png")) for suit in Suit}
@@ -120,11 +123,13 @@ class BattleView:
         final = battle.final_battle
         return self.dice_view.showing(battle.initiative, delay=0.8 if final and final.sudden_death else 0.0)
 
-    def _sync_combat(self, battle: Prototype, now: float) -> None:
+    def _sync_combat(self, battle: Prototype, real_now: float) -> float:
         if battle is not self._combat_battle:
             self._combat_battle = battle
             self._shown_attack = self._shown_cast = None
             self._attack_paused_at = None
+            self.death_presentation.reset(real_now)
+        now = self.death_presentation.advance(real_now)
         if battle.pending_skill is not self._shown_attack:
             self._shown_attack = battle.pending_skill
             self._attack_started = now
@@ -133,7 +138,9 @@ class BattleView:
             self._shown_cast = battle.last_cast
             self._cast_started = now
         self.character_animations.sync(battle, now)
-        self.arena.sync(battle, now, ready=battle.pending_skill is None and not self._showing_impact(now))
+        self.death_presentation.sync(battle, now, CLIPS)
+        self.arena.sync(battle, real_now, ready=battle.pending_skill is None and not self._showing_impact(now))
+        return now
 
     @staticmethod
     def _attack_duration(battle: Prototype) -> float:
@@ -144,7 +151,7 @@ class BattleView:
             now = self._attack_paused_at
         return max(0.0, now - self._attack_started)
 
-    def _update_attack(self, battle: Prototype, now: float) -> None:
+    def _update_attack(self, battle: Prototype, now: float, real_now: float) -> None:
         character_id = battle.current.character_id
         impact_time = attack_impact_time(character_id, battle.pending_skill.slot)
         if (impact_time is not None and not battle.pending_impact_applied
@@ -153,22 +160,22 @@ class BattleView:
             self._attack_started = now - impact_time
             if character_id == "assassin":
                 self._attack_paused_at = now
-            self._sync_combat(battle, now)
+            self._sync_combat(battle, real_now)
         if self._attack_paused_at is not None and not self._showing_impact(now):
             self._attack_started += now - self._attack_paused_at
             self._attack_paused_at = None
         if self.attack_elapsed(now) >= self._attack_duration(battle):
             battle.resolve_pending_skill()
-            self._sync_combat(battle, now)
+            self._sync_combat(battle, real_now)
 
     def update_combat(self, battle: Prototype) -> None:
-        now = monotonic()
-        self._sync_combat(battle, now)
+        real_now = monotonic()
+        now = self._sync_combat(battle, real_now)
         if battle.pending_skill is not None:
-            self._update_attack(battle, now)
-        if battle.final_opening_pending and self.arena.opening_finished(now):
+            self._update_attack(battle, now, real_now)
+        if battle.final_opening_pending and self.arena.opening_finished(real_now):
             battle.complete_final_opening()
-            self._sync_combat(battle, now)
+            self._sync_combat(battle, real_now)
 
     def _showing_impact(self, now: float) -> bool:
         if self.character_animations.playing_one_shot(now):
@@ -180,8 +187,7 @@ class BattleView:
         return now - self._cast_started < duration
 
     def combat_animating(self, battle: Prototype) -> bool:
-        now = monotonic()
-        self._sync_combat(battle, now)
+        now = self._sync_combat(battle, monotonic())
         return battle.pending_skill is not None or self._showing_impact(now)
 
     @classmethod
@@ -245,6 +251,37 @@ class BattleView:
     def draw_arena(self) -> None:
         self.arena.draw(self.game, monotonic(), self.width, self.height)
 
+    def draw_scene(self, header_bottom=932, footer_top=240) -> None:
+        now = self._sync_combat(self.game, monotonic())
+        camera = self.death_presentation.camera(now)
+        target = pico2d.SDL_GetRenderTarget(pico2d.renderer)
+        if camera is not None:
+            if self._scene_image is None:
+                texture = pico2d.SDL_CreateTexture(pico2d.renderer, pico2d.SDL_PIXELFORMAT_RGBA8888,
+                                                  pico2d.SDL_TEXTUREACCESS_TARGET, self.width, self.height)
+                if not texture:
+                    raise OSError("사망 카메라의 화면 텍스처를 만들 수 없습니다.")
+                self._scene_image = pico2d.Image(texture)
+            if pico2d.SDL_SetRenderTarget(pico2d.renderer, self._scene_image.texture) < 0:
+                raise OSError("사망 카메라의 화면으로 전환할 수 없습니다.")
+        try:
+            self.draw_arena()
+            self.shade_arena_hud(header_bottom, footer_top)
+            self.draw_board()
+        finally:
+            if camera is not None:
+                pico2d.SDL_SetRenderTarget(pico2d.renderer, target)
+        if camera is not None:
+            cells, zoom = camera
+            centers = tuple(self.cell_center(cell) for cell in cells)
+            x = sum(c[0] for c in centers) / len(centers)
+            y = sum(c[1] + 40 for c in centers) / len(centers)
+            width, height = round(self.width / zoom), round(self.height / zoom)
+            left = max(0, min(self.width - width, round(x * (1 - 1 / zoom))))
+            bottom = max(0, min(self.height - height, round(y * (1 - 1 / zoom))))
+            self._scene_image.clip_draw(left, bottom, width, height,
+                                         self.width // 2, self.height // 2, self.width, self.height)
+
     def shade_arena_hud(self, header_bottom: int, footer_top: int) -> None:
         self.rectangle((0, header_bottom, self.width - 1, self.height - 1), self.background, alpha=192)
         self.rectangle((0, 0, self.width - 1, footer_top), self.background, alpha=192)
@@ -263,9 +300,7 @@ class BattleView:
         holding_turn = opening or (animating and pending is None)
         announcing = not opening and not animating and self.initiative_revealing(self.game)
         revealing = not holding_turn and not animating and not announcing and self.card_revealing(self.game)
-        self.draw_arena()
-        self.shade_arena_hud(932, 240)
-        self.draw_board()
+        self.draw_scene()
         self.draw_health_and_round(show_initiative=not opening and not animating and not announcing)
         if not holding_turn:
             self.draw_turn_order()
@@ -378,13 +413,14 @@ class BattleView:
         attack_age = 0.0
         cast = None
         age = 0.0
-        now = monotonic()
+        real_now = monotonic()
+        now = real_now
         if battle is not None:
             board = battle.board
-            self._sync_combat(battle, now)
+            now = self._sync_combat(battle, real_now)
             pending = battle.pending_skill
             attack_age = self.attack_elapsed(now)
-            if not battle.is_over and not self._showing_impact(now) and not self.arena.waiting(battle, now):
+            if not battle.is_over and not self._showing_impact(now) and not self.arena.waiting(battle, real_now):
                 current = battle.current
             legal = battle.legal_moves if battle.move_preview else ()
             attack = pending.cells if pending else battle.skill_preview

@@ -120,10 +120,8 @@ class AnimationTestView(BattleView):
         return 1707, 603, 80, 112
 
     def draw(self) -> None:
-        now = monotonic()
-        self.draw_arena()
-        self.shade_arena_hud(913, 244)
-        self.draw_board()
+        self.draw_scene(913, 244)
+        now = self.death_presentation.time_at(monotonic())
         self.label(96, 1048, "전투 애니메이션 테스트", 32)
         for index, character in enumerate(CHARACTERS):
             left, bottom, right, top = bounds = self.button_bounds(index, 934, 1016)
