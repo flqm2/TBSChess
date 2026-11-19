@@ -19,11 +19,12 @@ EFFECTS = {
     ("assassin", 1): "assassin_flurry",
 }
 PER_CELL_EFFECTS = {
-    "archer_straight", "archer_fall", "mage_lightning", "mage_fireball",
+    "archer_straight", "archer_fall", "mage_lightning",
     "assassin_cut", "assassin_flurry",
     "gambler_heart", "gambler_spade", "gambler_club", "gambler_diamond",
 }
 GROUND_EFFECTS = {"warrior_slam", "archer_fall", "mage_lightning", "mage_fireball"}
+EFFECT_SCALES = {"assassin_cut": 1.8, "assassin_flurry": 1.8}
 FRAME_COUNT = 6
 FPS = 18
 
@@ -89,8 +90,9 @@ class AttackEffects:
         top = max(b[3] for b in bounds)
         tile_width = bounds[0][2] - bounds[0][0]
         tile_height = bounds[0][3] - bounds[0][1]
-        width = right - left + tile_width * 0.4
-        height = top - bottom + tile_height * 0.4
+        scale = EFFECT_SCALES.get(playback.name, 1.0)
+        width = (right - left + tile_width * 0.4) * scale
+        height = (top - bottom + tile_height * 0.4) * scale
         y = (bottom + top) / 2
         if playback.name in GROUND_EFFECTS:
             y += height * 0.25
