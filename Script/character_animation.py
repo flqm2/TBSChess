@@ -51,7 +51,7 @@ CLIPS = {
     "cardmaster": {
         "idle": Clip(9, 6), "skill1": Clip(13, 14, 1280, 960),
         "skill2": Clip(13, 14, 1280, 960), "hero": Clip(17, 14, 1600, 1600, 320),
-        "hit": HIT, "stun": Clip(9, 10), "death": Clip(12, 10),
+        "hit": HIT, "stun": Clip(9, 10), "death": Clip(12, 10), "passive": Clip(12, 12),
     },
     "assassin": {
         "idle": IDLE, "idle_empowered": IDLE,
@@ -230,7 +230,9 @@ class CharacterAnimations:
             if piece.current_hp == 0:
                 names.append("death")
             else:
-                if not stunned and piece.identifier not in self._holding_stun and any(hit.damage > 0 for hit in hits):
+                revived = piece.character_id == "cardmaster" and any(hit.passive_triggered for hit in hits)
+                if (not stunned and not revived and piece.identifier not in self._holding_stun
+                        and any(hit.damage > 0 for hit in hits)):
                     names.append("hit")
                 if any(hit.passive_triggered for hit in hits):
                     names.append("passive")
