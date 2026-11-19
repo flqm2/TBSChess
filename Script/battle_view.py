@@ -9,6 +9,7 @@ from time import monotonic
 from pico2d import pico2d
 
 from arena_view import ArenaView
+from attack_effects import AttackEffects
 from character_animation import CLIPS, CharacterAnimations, attack_duration, attack_impact_time
 from death_presentation import DeathPresentation
 from character_data import CHARACTERS
@@ -78,6 +79,7 @@ class BattleView:
             self.portraits[path] = pico2d.load_image(str(self.resource_dir / path))
         self.grayscale_portraits = {}
         self.character_animations = CharacterAnimations(self.resource_dir, self.sprite_layouts)
+        self.attack_effects = AttackEffects(self.resource_dir / "Effects")
         self.death_presentation = DeathPresentation()
         self._scene_image = None
         self.arena = ArenaView(self.resource_dir / "Arena")
@@ -130,6 +132,7 @@ class BattleView:
             self._shown_attack = self._shown_cast = None
             self._attack_paused_at = None
             self.death_presentation.reset(real_now)
+            self.attack_effects.playback = None
         now = self.death_presentation.advance(real_now)
         if battle.pending_skill is not self._shown_attack:
             self._shown_attack = battle.pending_skill
@@ -157,6 +160,7 @@ class BattleView:
         impact_time = attack_impact_time(character_id, battle.pending_skill.slot)
         if (impact_time is not None and not battle.pending_impact_applied
                 and self.attack_elapsed(now) >= impact_time):
+            self.attack_effects.play(battle.current, battle.pending_skill, now)
             battle.apply_pending_impact()
             self._attack_started = now - impact_time
             if character_id == "assassin":
@@ -179,7 +183,7 @@ class BattleView:
             self._sync_combat(battle, real_now)
 
     def _showing_impact(self, now: float) -> bool:
-        if self.character_animations.playing_one_shot(now):
+        if self.character_animations.playing_one_shot(now) or self.attack_effects.playing(now):
             return True
         cast = self._shown_cast
         if cast is None:
@@ -500,6 +504,7 @@ class BattleView:
             with damage_tint(image, tint_channel):
                 image.composite_draw(0, "h" if mirrored else "", *placement)
         if battle is not None:
+            self.attack_effects.draw(now, self.cell_bounds)
             for box in battle.boxes:
                 if box.owner.current_hp > 0:
                     _, _, right, top = self.cell_bounds(box.cell)
