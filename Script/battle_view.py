@@ -19,6 +19,7 @@ from passives import DESCRIPTIONS, aura_cells
 from piece import Job, Piece, Team
 from portraits import damage_tint, load_grayscale_portrait, load_portrait
 from prototype import ActionMode, Prototype
+from skills import Effect
 
 
 CANVAS_WIDTH, CANVAS_HEIGHT = 1920, 1080
@@ -160,8 +161,10 @@ class BattleView:
         impact_time = attack_impact_time(character_id, battle.pending_skill.slot)
         if (impact_time is not None and not battle.pending_impact_applied
                 and self.attack_elapsed(now) >= impact_time):
-            self.attack_effects.play(battle.current, battle.pending_skill, now)
             battle.apply_pending_impact()
+            pending = battle.pending_skill
+            cells = battle.last_cast.cells if pending.skill.effect is Effect.RANDOM_MARK else pending.cells
+            self.attack_effects.play(battle.current, pending, now, cells=cells)
             self._attack_started = now - impact_time
             if character_id == "assassin":
                 self._attack_paused_at = now
@@ -170,6 +173,8 @@ class BattleView:
             self._attack_started += now - self._attack_paused_at
             self._attack_paused_at = None
         if self.attack_elapsed(now) >= self._attack_duration(battle):
+            if not battle.pending_impact_applied:
+                self.attack_effects.play(battle.current, battle.pending_skill, now)
             battle.resolve_pending_skill()
             self._sync_combat(battle, real_now)
 

@@ -10,7 +10,18 @@ EFFECTS = {
     ("slayer", 1): "slayer_thrust",
     ("warrior", 0): "warrior_slam",
     ("warrior", 1): "warrior_sweep",
+    ("archer", 0): "archer_straight",
+    ("archer", 1): "archer_fall",
+    ("mage", 0): "mage_lightning",
+    ("mage", 1): "mage_fireball",
+    ("assassin", 0): "assassin_cut",
+    ("assassin", 1): "assassin_flurry",
 }
+PER_CELL_EFFECTS = {
+    "archer_straight", "archer_fall", "mage_lightning", "mage_fireball",
+    "assassin_cut", "assassin_flurry",
+}
+GROUND_EFFECTS = {"warrior_slam", "archer_fall", "mage_lightning", "mage_fireball"}
 FRAME_COUNT = 6
 FPS = 18
 
@@ -29,10 +40,11 @@ class AttackEffects:
         self.images = {}
         self.playback: Playback | None = None
 
-    def play(self, caster, pending, now: float) -> None:
+    def play(self, caster, pending, now: float, *, cells=None) -> None:
         name = EFFECTS.get((caster.character_id, pending.slot))
-        if name is not None and pending.cells:
-            self.playback = Playback(name, pending.cells, caster.facing, now)
+        cells = pending.cells if cells is None else cells
+        if name is not None and cells:
+            self.playback = Playback(name, cells, caster.facing, now)
 
     def playing(self, now: float) -> bool:
         return self.playback is not None and 0 <= now - self.playback.started < FRAME_COUNT / FPS
@@ -50,7 +62,15 @@ class AttackEffects:
         frame = min(FRAME_COUNT - 1, int((now - playback.started) * FPS))
         row, column = divmod(frame, 3)
         frame_width, frame_height = image.w // 3, image.h // 2
-        bounds = tuple(cell_bounds(cell) for cell in playback.cells)
+        regions = (playback.cells,)
+        if playback.name in PER_CELL_EFFECTS:
+            regions = tuple((cell,) for cell in playback.cells)
+        for cells in regions:
+            bounds = tuple(cell_bounds(cell) for cell in cells)
+            self._draw_region(image, playback, row, column, frame_width, frame_height, bounds)
+
+    @staticmethod
+    def _draw_region(image, playback, row, column, frame_width, frame_height, bounds) -> None:
         left = min(b[0] for b in bounds)
         bottom = min(b[1] for b in bounds)
         right = max(b[2] for b in bounds)
@@ -60,7 +80,7 @@ class AttackEffects:
         width = right - left + tile_width * 0.4
         height = top - bottom + tile_height * 0.4
         y = (bottom + top) / 2
-        if playback.name == "warrior_slam":
+        if playback.name in GROUND_EFFECTS:
             y += height * 0.25
         image.clip_composite_draw(column * frame_width, image.h - (row + 1) * frame_height,
                                    frame_width, frame_height, 0, "h" if playback.facing < 0 else "",
